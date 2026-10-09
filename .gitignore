@@ -1,0 +1,22 @@
+# Large data files
+*.fits
+*.npy
+*.hdf5
+*.h5
+
+# Logs and checkpoints
+logs/
+*.log
+*.err
+*.out
+slurm-*.out
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# Editor
+.vscode/
+*.swp
