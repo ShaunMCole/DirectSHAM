@@ -12,4 +12,3 @@ two-point clustering statistics.
 
 ## Authors
 Shaun Cole (Durham ICC)
-test
