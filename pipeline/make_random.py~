@@ -1,0 +1,569 @@
+"""
+make_random.py — Generate a clone-based random catalogue for the DESI BGS
+using the Cole (2011) method with a DeltaZ window restriction and
+Metropolis-Hastings boundary correction.
+
+Run once for each photometric region (N then S).  When South is run and the
+North file already exists the two are automatically concatenated into a
+combined N+S catalogue with CAP and WEIGHT columns added.
+
+The per-region output files also carry a WEIGHT column (= 1/NMULT) so they
+can be used directly by the clustering pipeline if N or S subsets are ever
+analysed separately.
+
+Usage examples
+--------------
+# North first:
+python make_random.py --reg N
+
+# Then South (triggers automatic concatenation):
+python make_random.py --reg S
+
+# Use a different oversampling factor:
+python make_random.py --reg N --nmult 10
+
+# Use a different DeltaZ window:
+python make_random.py --reg N --delta_z 0.05
+"""
+
+import argparse
+import gc
+import sys
+import time
+from pathlib import Path
+
+import numpy as np
+from astropy.coordinates import SkyCoord
+from astropy.table import Table, vstack
+import astropy.units as u
+
+# Pipeline modules
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from config import (
+    DATA_DATE,
+    DELTA_Z,
+    NMULT,
+    NSAMP,
+    BGS_CAT,
+    DESI_RANDOMS_TEMPLATE,
+    cosmo,
+)
+from pipeline_utils import make_paths, write_fits_meta, setup_logging
+
+
+# =============================================================================
+# Argument parsing
+# =============================================================================
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument(
+        "--reg", required=True, choices=["N", "S"],
+        help="Photometric region to process: N (North) or S (South).",
+    )
+    p.add_argument(
+        "--nmult", type=int, default=NMULT,
+        help=(
+            f"Target oversampling factor: number of randoms per weighted "
+            f"galaxy. (default: {NMULT})"
+        ),
+    )
+    p.add_argument(
+        "--delta_z", type=float, default=DELTA_Z,
+        help=(
+            f"Maximum redshift displacement when cloning a galaxy. "
+            f"Reducing sensitivity to luminosity function evolution. "
+            f"(default: {DELTA_Z})"
+        ),
+    )
+    p.add_argument(
+        "--nsamp", type=int, default=NSAMP,
+        help=(
+            f"Mean number of clones per galaxy per overdensity iteration. "
+            f"(default: {NSAMP})"
+        ),
+    )
+    p.add_argument(
+        "--date", type=str, default=DATA_DATE,
+        help=f"Date tag for input/output filenames. (default: {DATA_DATE})",
+    )
+    p.add_argument(
+        "--bgs_cat", type=str, default=None,
+        help=(
+            "Path to the processed BGS catalogue. "
+            "Defaults to BGS_CAT from config.py."
+        ),
+    )
+    return p.parse_args()
+
+
+# =============================================================================
+# Data loading
+# =============================================================================
+
+def load_bgs_catalogue(bgs_cat_path, reg, delta_z, log):
+    """
+    Read the processed BGS catalogue, filter to the requested region,
+    apply DeltaZ clipping to visibility limits, and compute volume
+    coordinates.
+
+    Returns the filtered data table.
+    """
+    import catalogue_analysis as ca
+
+    path = Path(bgs_cat_path)
+    if not path.exists():
+        log.error(f"BGS catalogue not found: {path}")
+        sys.exit(1)
+
+    log.info(f"Reading BGS catalogue: {path}")
+    t0 = time.time()
+    datfull = Table.read(str(path))
+    log.info(f"Read {len(datfull):,} rows in {time.time()-t0:.1f}s")
+
+    # Warn if the catalogue version tag looks unexpected.
+    if 'BGSFILE' in datfull.meta:
+        log.info(f"Catalogue source: {datfull.meta['BGSFILE']}")
+
+    # Restrict to the requested region and keep only the columns needed.
+    mask = (datfull['reg'] == reg)
+    dat  = datfull[
+        'TARGETID', 'zmin', 'zmax', 'WEIGHT', 'ABSMAG_RP1', 'ABSMAG_GP1',
+        'Z', 'reg', 'rmag', 'RA', 'DEC', 'REST_GMR_0P1'
+    ][mask].copy()
+    del datfull
+    gc.collect()
+    log.info(f"Region {reg}: {len(dat):,} galaxies after region filter")
+
+    # Save original visibility limits before DeltaZ clipping.
+    dat['zmin_orig'] = dat['zmin'].copy()
+    dat['zmax_orig'] = dat['zmax'].copy()
+
+    # Clip visibility window to within DeltaZ of the observed redshift.
+    dat['zmin'] = np.clip(dat['zmin'], a_min=dat['Z'] - delta_z, a_max=np.inf)
+    dat['zmax'] = np.clip(dat['zmax'], a_min=-np.inf,            a_max=dat['Z'] + delta_z)
+
+    # Compute volume coordinates (v, vmin, vmax) from the clipped limits.
+    ca.add_vminvmax(dat, reg)
+    log.info("Volume coordinates computed.")
+
+    return dat
+
+
+# =============================================================================
+# Official DESI randoms loading
+# =============================================================================
+
+def load_desi_randoms(reg, nmult, dat, log):
+    """
+    Read official DESI random catalogue files one at a time until we have
+    accumulated at least NTARGET rows for the requested region.
+
+    Returns the random catalogue table (RA, DEC, reg columns only).
+    """
+    import catalogue_analysis as ca
+
+    ntarget = int(np.round(nmult * np.sum(dat['WEIGHT'])))
+    log.info(
+        f"Target random count: {ntarget:,}  "
+        f"(oversampling weighted data by factor {nmult})"
+    )
+
+    ran_tables  = []
+    nran_total  = 0
+    i           = 0
+
+    while nran_total < ntarget:
+        fpath = DESI_RANDOMS_TEMPLATE.format(i=i)
+        log.info(f"Reading {fpath}  (have {nran_total:,} of {ntarget:,})")
+        ranfull = ca.Y3load_catalogues(fpath, columns=['RA', 'DEC', 'PHOTSYS'])
+        mask    = (ranfull['reg'] == reg)
+        ran_i   = ranfull['RA', 'DEC', 'reg'][mask].copy()
+        del ranfull
+        gc.collect()
+        ran_tables.append(ran_i)
+        nran_total += len(ran_i)
+        i += 1
+
+    ran = vstack(ran_tables, metadata_conflicts='silent')
+    del ran_tables
+    gc.collect()
+
+    # Trim to exactly ntarget rows.
+    rng = np.random.default_rng(seed=12345)
+    ran = ran[rng.choice(len(ran), size=ntarget, replace=False)]
+    log.info(f"Official DESI randoms loaded: {len(ran):,} rows")
+    return ran
+
+
+# =============================================================================
+# Metropolis-Hastings boundary correction
+# =============================================================================
+
+def metropolis_shuffle_v(v_current, vmin, vmax, zmin_orig, zmax_orig,
+                         delta_z, vol_of_z, z_of_vol):
+    """
+    Redistribute galaxy clones within their DeltaZ-restricted visibility
+    volume using a Metropolis-Hastings acceptance step to remove the
+    boundary-driven radial density bias that arises from the varying width
+    of the accessible volume interval near the edges of each galaxy's
+    visibility window.
+
+    Parameters
+    ----------
+    v_current : array
+        Current relative volume coordinate of each clone's parent galaxy.
+    vmin : array
+        Absolute cumulative comoving volume at the lower DeltaZ-clipped limit.
+    vmax : array
+        Width of the DeltaZ-clipped visibility window in volume units.
+    zmin_orig, zmax_orig : array
+        Original (unclipped) lower and upper redshift visibility limits.
+    delta_z : float
+        DeltaZ window half-width.
+    vol_of_z, z_of_vol : callable
+        Fast interpolation functions from ca.make_vol_interp().
+
+    Returns
+    -------
+    v_out : array
+        Relative volume coordinate after the Metropolis step.
+    """
+    nclones = len(vmax)
+    L_old   = vmax
+
+    # Propose a new position uniformly within the current window.
+    v_prop   = L_old * np.random.uniform(size=nclones)
+    vol_prop = vmin + v_prop
+    z_prop   = z_of_vol(vol_prop)
+
+    # Compute the window width at the proposed position.
+    zmin_prop = np.maximum(zmin_orig, z_prop - delta_z)
+    zmax_prop = np.minimum(zmax_orig, z_prop + delta_z)
+    L_new     = vol_of_z(zmax_prop) - vol_of_z(zmin_prop)
+
+    # Accept with probability min(1, L_old / L_new).
+    p_accept         = np.minimum(1.0, L_old / L_new)
+    accept           = np.random.uniform(size=nclones) < p_accept
+    v_out            = v_current.copy()
+    v_out[accept]    = v_prop[accept]
+
+    # Clip to hard boundaries to guard against interpolation round-trip errors.
+    volmax_orig = vol_of_z(zmax_orig)
+    volmin_orig = vol_of_z(zmin_orig)
+    v_out = np.clip(v_out, volmin_orig - vmin, volmax_orig - vmin)
+
+    return v_out
+
+
+# =============================================================================
+# Random catalogue generation
+# =============================================================================
+
+def random_catalogue(ran, dat, reg, delta_z, nsamp, nbins=200, log=None):
+    """
+    Generate the random catalogue using the iterative clone-and-reweight
+    method of Cole (2011), restricted to a DeltaZ window and corrected for
+    boundary-driven density bias via Metropolis-Hastings.
+
+    Modifies ran in place by adding photometric and redshift columns.
+
+    Parameters
+    ----------
+    ran : astropy Table
+        Official DESI random positions (RA, DEC, reg).
+    dat : astropy Table
+        BGS galaxy catalogue with volume coordinates already computed.
+    reg : str
+        Photometric region ('N' or 'S').
+    delta_z : float
+        DeltaZ window half-width.
+    nsamp : int
+        Mean clones per galaxy per iteration.
+    nbins : int
+        Number of volume bins for overdensity estimation.
+    log : logging.Logger
+    """
+    import catalogue_analysis as ca
+    from kcorrections import DESI_KCorrection
+
+    def _log(msg):
+        if log:
+            log.info(msg)
+        else:
+            print(msg)
+
+    Sel         = ca.selection(reg)
+    vol_of_z, z_of_vol, dmod_of_z = ca.make_vol_interp(reg)
+
+    regmask    = (dat['reg'] == reg)
+    ranregmask = (ran['reg'] == reg)
+
+    vmin_sample = Sel['area'] * (4*np.pi/3) * cosmo.comoving_distance(Sel['zmin']).value**3
+    vmax_sample = Sel['area'] * (4*np.pi/3) * cosmo.comoving_distance(Sel['zmax']).value**3 - vmin_sample
+
+    vbins     = np.linspace(0.0, vmax_sample, nbins)
+    vbin_cen  = (vbins[:-1] + vbins[1:]) / 2.0
+
+    Delta_vbin = np.ones(vbin_cen.size)
+    Delta      = np.ones(len(dat))
+
+    # Weighted data histogram in volume coordinate.
+    vhist_dat, _ = np.histogram(
+        dat['v'][regmask] + dat['vmin'][regmask] - vmin_sample,
+        bins=vbins,
+        weights=dat['WEIGHT'][regmask],
+    )
+
+    # Volume bin index for each galaxy.
+    iv = np.zeros(len(dat), dtype=int)
+    iv[regmask] = np.digitize(
+        dat['v'][regmask] + dat['vmin'][regmask] - vmin_sample, vbins
+    ) - 1
+
+    # ------------------------------------------------------------------
+    # Iterative clone-and-reweight loop
+    # ------------------------------------------------------------------
+    t_total = time.time()
+    for j in range(5):
+        _log(f"Overdensity iteration {j}")
+
+        nmean = nsamp * dat['WEIGHT'] / Delta
+        n     = np.floor(nmean).astype(int)
+        extra = np.random.uniform(size=len(Delta)) < (nmean - n)
+        n[extra & regmask] += 1
+
+        reg_idx          = np.where(regmask)[0]
+        counts           = n[reg_idx]
+        v_parents        = np.repeat(dat['v'][reg_idx],         counts)
+        vmin_clones      = np.repeat(dat['vmin'][reg_idx],      counts)
+        vmax_clones      = np.repeat(dat['vmax'][reg_idx],      counts)
+        zmin_orig_clones = np.repeat(dat['zmin_orig'][reg_idx], counts)
+        zmax_orig_clones = np.repeat(dat['zmax_orig'][reg_idx], counts)
+
+        total_clones = counts.sum()
+        _log(f"  Total clones: {total_clones:,}")
+
+        t0 = time.time()
+        v_clones = metropolis_shuffle_v(
+            v_parents, vmin_clones, vmax_clones,
+            zmin_orig_clones, zmax_orig_clones,
+            delta_z, vol_of_z, z_of_vol,
+        )
+        _log(f"  metropolis_shuffle_v: {time.time()-t0:.1f}s")
+
+        vhist, _ = np.histogram(vmin_clones + v_clones - vmin_sample, bins=vbins)
+
+        binmask            = (vhist > 0)
+        Delta_vbin[binmask] = nsamp * vhist_dat[binmask] / vhist[binmask]
+        Delta_vbin          = Delta_vbin / np.mean(Delta_vbin)
+        Delta[regmask]      = Delta_vbin[iv[regmask]]
+
+        _log(
+            f"  RMS Delta={np.sqrt(np.mean((Delta_vbin-1)**2)):.4f}  "
+            f"elapsed={time.time()-t_total:.1f}s"
+        )
+
+    # ------------------------------------------------------------------
+    # Assign RA/DEC positions and randomise radial coordinates
+    # ------------------------------------------------------------------
+    _log("Assigning clones to official random positions")
+
+    nran = np.count_nonzero(ranregmask)
+    prob = dat['WEIGHT'][regmask] / Delta[regmask]
+    prob = prob / prob.sum()
+
+    chosen = np.random.choice(np.count_nonzero(regmask), size=nran, p=prob)
+
+    # Copy intrinsic properties.
+    ran['ABSMAG_RP1'] = np.zeros(len(ran))
+    ran['ABSMAG_R']   = np.zeros(len(ran))
+    ran['ABSMAG_GP1'] = np.zeros(len(ran))
+    ran['REST_GMR_0P1'] = np.zeros(len(ran))
+    ran['v']          = np.zeros(len(ran))
+    ran['Z']          = np.zeros(len(ran))
+    ran['rmag']       = np.zeros(len(ran))
+    ran['gmag']       = np.zeros(len(ran))
+    ran['zmin']       = np.zeros(len(ran))
+    ran['zmax']       = np.zeros(len(ran))
+    ran['TARGETID']   = np.zeros(len(ran), dtype=np.int64)
+
+    dat_reg = dat[regmask]
+    ran['ABSMAG_RP1'][ranregmask]   = dat_reg['ABSMAG_RP1'][chosen]
+    ran['ABSMAG_GP1'][ranregmask]   = dat_reg['ABSMAG_GP1'][chosen]
+    ran['REST_GMR_0P1'][ranregmask] = dat_reg['REST_GMR_0P1'][chosen]
+    ran['zmin'][ranregmask]         = dat_reg['zmin_orig'][chosen]
+    ran['zmax'][ranregmask]         = dat_reg['zmax_orig'][chosen]
+    ran['TARGETID'][ranregmask]     = dat_reg['TARGETID'][chosen]
+
+    # Randomise radial position within DeltaZ window using Metropolis step.
+    ran['v'][ranregmask] = (
+        dat_reg['vmin'][chosen]
+        + metropolis_shuffle_v(
+            dat_reg['v'][chosen],
+            dat_reg['vmin'][chosen],
+            dat_reg['vmax'][chosen],
+            dat_reg['zmin_orig'][chosen],
+            dat_reg['zmax_orig'][chosen],
+            delta_z, vol_of_z, z_of_vol,
+        )
+    )
+
+    ran['Z'][ranregmask] = z_of_vol(ran['v'][ranregmask])
+    DMOD                 = dmod_of_z(ran['Z'][ranregmask])
+    rest_GMR             = ran['REST_GMR_0P1'][ranregmask]
+
+    # Recompute apparent magnitudes at the clone redshift.
+    kcorr_r = DESI_KCorrection(band='R', file='jmext', photsys=reg)
+    kcorr_g = DESI_KCorrection(band='G', file='jmext', photsys=reg)
+    Qr      = Sel['Qr']
+    Qg      = Sel['Qg']
+
+    ran['rmag'][ranregmask] = np.clip(
+        ran['ABSMAG_RP1'][ranregmask] + DMOD
+        - Qr * (ran['Z'][ranregmask] - 0.1)
+        + kcorr_r.k(ran['Z'][ranregmask], rest_GMR),
+        -np.inf, Sel['faint'],
+    )
+    ran['gmag'][ranregmask] = (
+        ran['ABSMAG_GP1'][ranregmask] + DMOD
+        - Qg * (ran['Z'][ranregmask] - 0.1)
+        + kcorr_g.k(ran['Z'][ranregmask], rest_GMR)
+    )
+
+    # ABSMAG_R using a fixed reference colour (colour-independent k-correction).
+    rest_GMR_ref = np.full_like(rest_GMR, 0.77)
+    ran['ABSMAG_R'][ranregmask] = (
+        ran['rmag'][ranregmask] - DMOD
+        + Qr * (ran['Z'][ranregmask] - 0.1)
+        - kcorr_r.k(ran['Z'][ranregmask], rest_GMR_ref)
+    )
+
+    del DMOD, rest_GMR, rest_GMR_ref, dat_reg
+    _log("random_catalogue() complete.")
+
+
+# =============================================================================
+# Concatenation helper
+# =============================================================================
+
+def concatenate_regions(path_N, path_S, path_combined, nmult, log):
+    """
+    Read the per-region files, verify metadata consistency, concatenate,
+    add CAP and WEIGHT columns, and write the combined catalogue.
+    """
+    log.info("=== Concatenating N + S into combined fordata random catalogue ===")
+
+    ignore_meta = {'REG'}
+    ranN = Table.read(str(path_N))
+    ranS = Table.read(str(path_S))
+
+    log.info("Verifying N/S metadata consistency")
+    for key in set(ranN.meta) | set(ranS.meta):
+        if key in ignore_meta:
+            continue
+        valN = ranN.meta.get(key)
+        valS = ranS.meta.get(key)
+        if valN != valS:
+            raise ValueError(
+                f"Incompatible metadata for '{key}': N={valN!r}, S={valS!r}"
+            )
+
+    ran = vstack([ranN, ranS], metadata_conflicts='silent')
+    del ranN, ranS
+    gc.collect()
+
+    # Add galactic cap column.
+    log.info("Computing galactic cap (NGC/SGC)")
+    c        = SkyCoord(ra=ran['RA']*u.deg, dec=ran['DEC']*u.deg, frame='icrs')
+    ran['CAP']    = np.where(c.galactic.b > 0, 'NGC', 'SGC')
+    ran['WEIGHT'] = 1.0 / nmult
+    del c
+
+    # Remove the single-region REG key from combined metadata.
+    ran.meta.pop('REG', None)
+
+    write_fits_meta(ran.meta, {"STAGE": "make_random", "NMULT": nmult})
+    ran.write(str(path_combined), overwrite=True)
+    log.info(f"Written combined catalogue ({len(ran):,} rows): {path_combined}")
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+def main():
+    args = parse_args()
+    log  = setup_logging("make_random")
+    log.info(
+        f"reg={args.reg}  nmult={args.nmult}  delta_z={args.delta_z}  "
+        f"nsamp={args.nsamp}  date={args.date}"
+    )
+
+    bgs_cat_path = args.bgs_cat if args.bgs_cat else str(BGS_CAT)
+
+    # Output paths.
+    paths        = make_paths(reg=args.reg, date=args.date)
+    path_out     = paths[f"fordata_ran_{args.reg}"]
+    path_combined = paths["fordata_ran"]
+    path_out.parent.mkdir(parents=True, exist_ok=True)
+
+    # -------------------------------------------------------------------------
+    # 1. Load BGS catalogue
+    # -------------------------------------------------------------------------
+    dat = load_bgs_catalogue(bgs_cat_path, args.reg, args.delta_z, log)
+
+    # -------------------------------------------------------------------------
+    # 2. Load official DESI randoms (RA/DEC positions only)
+    # -------------------------------------------------------------------------
+    ran = load_desi_randoms(args.reg, args.nmult, dat, log)
+
+    # -------------------------------------------------------------------------
+    # 3. Run iterative clone-and-reweight algorithm
+    # -------------------------------------------------------------------------
+    np.random.seed(53)   # matches notebook for reproducibility
+    random_catalogue(ran, dat, args.reg, args.delta_z, args.nsamp, log=log)
+
+    # -------------------------------------------------------------------------
+    # 4. Write per-region file with metadata
+    # -------------------------------------------------------------------------
+    # Add WEIGHT column so per-region files are usable by the clustering code.
+    ran['WEIGHT'] = 1.0 / args.nmult
+
+    write_fits_meta(ran.meta, {
+        "STAGE":  "make_random",
+        "REG":    args.reg,
+        "NMULT":  args.nmult,
+        "DELTAZ": args.delta_z,
+    })
+
+    ran.write(str(path_out), overwrite=True)
+    log.info(f"Written fordata randoms ({len(ran):,} rows): {path_out}")
+
+    # -------------------------------------------------------------------------
+    # 5. If both regions now exist, concatenate into combined N+S file
+    # -------------------------------------------------------------------------
+    other_reg  = 'S' if args.reg == 'N' else 'N'
+    paths_other = make_paths(reg=other_reg, date=args.date)
+    path_other  = paths_other[f"fordata_ran_{other_reg}"]
+
+    if path_other.exists():
+        log.info(f"Both regions present — concatenating.")
+        path_N = path_out   if args.reg == 'N' else path_other
+        path_S = path_other if args.reg == 'N' else path_out
+        concatenate_regions(path_N, path_S, path_combined, args.nmult, log)
+    else:
+        log.info(
+            f"Other region ({other_reg}) not yet present at {path_other} — "
+            "skipping concatenation.  Run make_random.py for the other "
+            "region to produce the combined catalogue."
+        )
+
+    log.info("make_random.py complete.")
+
+
+if __name__ == "__main__":
+    main()
