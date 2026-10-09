@@ -8,8 +8,8 @@
 #SBATCH --cpus-per-task=256
 #SBATCH --mem=0
 #SBATCH --time=00:30:00
-#SBATCH --output=logs/xi_mock_%x_%j.out
-#SBATCH --error=logs/xi_mock_%x_%j.err
+#SBATCH --output=/global/homes/s/smcole/DirectSHAM/logs/xi_mock_%x_%j.out
+#SBATCH --error=/global/homes/s/smcole/DirectSHAM/logs/xi_mock_%x_%j.err
 
 # slurm_measure_mock.sh — Submit measure_mock_clustering.py for one mock
 # realisation and one set of sample selection parameters.

@@ -8,8 +8,8 @@
 #SBATCH --cpus-per-task=256
 #SBATCH --mem=0                  # request all memory on the node
 #SBATCH --time=02:00:00
-#SBATCH --output=logs/checkpoint_%x_%j.out
-#SBATCH --error=logs/checkpoint_%x_%j.err
+#SBATCH --output=/global/homes/s/smcole/DirectSHAM/logs/checkpoint_%x_%j.out
+#SBATCH --error=/global/homes/s/smcole/DirectSHAM/logs/checkpoint_%x_%j.err
 
 # slurm_checkpoint.sh — Submit make_checkpoint.py for one region and one
 # set of scatter parameters.

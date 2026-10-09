@@ -8,8 +8,8 @@
 #SBATCH --cpus-per-task=256
 #SBATCH --mem=0
 #SBATCH --time=01:00:00
-#SBATCH --output=logs/xi_data_%x_%j.out
-#SBATCH --error=logs/xi_data_%x_%j.err
+#SBATCH --output=/global/homes/s/smcole/DirectSHAM/logs/xi_data_%x_%j.out
+#SBATCH --error=/global/homes/s/smcole/DirectSHAM/logs/xi_data_%x_%j.err
 
 # slurm_measure_clustering.sh — Submit measure_clustering.py for one set of
 # sample selection parameters.
