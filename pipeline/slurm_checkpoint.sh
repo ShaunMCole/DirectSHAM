@@ -47,8 +47,6 @@ export PYTHONPATH=:$SCRATCH/LSS/py:$PYTHONPATH
 # Move into the pipeline directory so relative imports work.
 cd "$(dirname "$0")"
 
-# Ensure the logs directory exists.
-mkdir -p logs
 
 python make_checkpoint.py \
     --reg        "${REG}" \
