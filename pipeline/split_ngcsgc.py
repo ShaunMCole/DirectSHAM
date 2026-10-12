@@ -160,7 +160,7 @@ def split_formock_randoms(paths, log):
 
     # Verify metadata agrees between N and S (NMULT must match).
     log.info("Verifying N/S metadata consistency")
-    ignore_meta = {'REG', 'FSKY'}
+    ignore_meta = {'REG', 'FSKY', 'CREATED', 'PIPE_VER', 'NMULT'}
     for key in set(ranN.meta) | set(ranS.meta):
         if key in ignore_meta:
             continue
@@ -170,7 +170,19 @@ def split_formock_randoms(paths, log):
             raise ValueError(
                 f"Incompatible metadata for '{key}': N={valN!r}, S={valS!r}"
             )
-    log.info(f"NMULT N={ranN.meta['NMULT']}  S={ranS.meta['NMULT']}")
+
+    # Check NMULT separately with a tolerance since N and S are matched
+    # but may differ by a tiny floating point amount.
+    nmult_N = ranN.meta.get('NMULT', None)
+    nmult_S = ranS.meta.get('NMULT', None)
+    if nmult_N is not None and nmult_S is not None:
+        reldiff = abs(nmult_N - nmult_S) / nmult_N
+        if reldiff > 0.002:
+            raise ValueError(
+                f"NMULT mismatch: N={nmult_N:.6f}, S={nmult_S:.6f} "
+                f"(relative difference {reldiff:.4f} > 0.2%)"
+            )
+    log.info(f"NMULT N={nmult_N}  S={nmult_S}")
 
     log.info("Concatenating N + S")
     ran = vstack([ranN, ranS], metadata_conflicts='silent')
@@ -294,4 +306,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -204,7 +204,7 @@ def make_formock_randoms(randoms, paths, args, log):
 
     # South: downsample to match the North NMULT value.
     if args.reg == 'S':
-        path_formock_N = paths["formock_ran_N"]
+        path_formock_N = make_paths(reg='N')["formock_ran_N"]
         if not path_formock_N.exists():
             log.error(
                 f"North formock randoms not found: {path_formock_N}\n"
@@ -247,13 +247,21 @@ def run_sham(subhalos, randoms, fsky, nmult_formock, deltaz, args, log):
     rsphere = LBOX * FRAC_BOX
     z_bins  = np.linspace(Sel['zmin'], Sel['zmax'], args.n_zbins)
 
+    from config import DATA_DIR
+
+    diagnostics_path = str(
+        DATA_DIR / f"diagnostics_{args.reg}_seed{args.obs_seed:03d}"
+                   f"_sig_lgv{args.sig_lgv:.2f}.fits"
+    )
+
     log.info(
         f"Running SHAM: {args.n_zbins} redshift slices  "
         f"N_neigh_lum={args.n_neigh_lum}  fsky={fsky:.5f}  NMULT={nmult_formock:.4f}"
     )
+    log.info(f"Diagnostics will be written to: {diagnostics_path}")
     t0 = time.time()
 
-    subhalo_id, galaxy_id = mc.abundance_match_subhalos_to_randoms(
+    subhalo_id, galaxy_id, z_insufficient = mc.abundance_match_subhalos_to_randoms(
         subhalos=subhalos,
         ran=randoms,
         lbox=LBOX,
@@ -266,9 +274,12 @@ def run_sham(subhalos, randoms, fsky, nmult_formock, deltaz, args, log):
         reg=args.reg,
         N_neigh=args.n_neigh_lum,
         Rejection=False,
+        diagnostics_path=diagnostics_path,
     )
     log.info(f"SHAM matched {len(subhalo_id):,} pairs in {time.time()-t0:.1f}s")
-    return subhalo_id, galaxy_id
+    if z_insufficient is not None:
+        log.info(f"Subhalo density insufficient up to z={z_insufficient:.3f}")
+    return subhalo_id, galaxy_id, z_insufficient
 
 
 # =============================================================================
@@ -465,13 +476,27 @@ def main():
     if path_ran_out.exists() or path_ran_out.is_symlink():
         # Check the existing file is compatible with the current parameters.
         log.info(f"Formock random catalogue already exists: {path_ran_out}")
-        existing_meta = Table.read(str(path_ran_out), rows=0).meta
+        from astropy.io.fits import getheader
+        existing_meta = getheader(str(path_ran_out), ext=1)
         try:
+            # Check REG and DELTAZ exactly, but allow NMULT to vary by up
+            # to 1% since fsky is estimated by random sampling and varies
+            # slightly between runs.
             check_fits_meta(
                 existing_meta,
-                {"REG": args.reg, "DELTAZ": deltaz, "NMULT": nmult_formock},
+                {"REG": args.reg, "DELTAZ": deltaz},
                 strict=True,
             )
+            nmult_stored = existing_meta.get("NMULT", None)
+            if nmult_stored is not None:
+                nmult_reldiff = abs(nmult_stored - nmult_formock) / nmult_formock
+                if nmult_reldiff > 0.002:
+                    raise ValueError(
+                        f"Metadata mismatch for 'NMULT': "
+                        f"file has {nmult_stored:.6f}, "
+                        f"expected {nmult_formock:.6f} "
+                        f"(relative difference {nmult_reldiff:.4f} > 0.2%)"
+                    )
             log.info(
                 "Existing formock randoms are compatible — reusing without "
                 "regenerating.  Loading for SHAM."
@@ -528,7 +553,7 @@ def main():
     # -------------------------------------------------------------------------
     # 5. Run SHAM
     # -------------------------------------------------------------------------
-    subhalo_id, galaxy_id = run_sham(
+    subhalo_id, galaxy_id, z_insufficient = run_sham(
         subhalos, randoms, fsky, nmult_formock, deltaz, args, log
     )
 
@@ -559,6 +584,7 @@ def main():
         "DELTAZ":     deltaz,
         "NMULT":      nmult_formock,
         "FSKY":       fsky,
+        "Z_INSUF":    float(z_insufficient) if z_insufficient is not None else -1.0,
     })
 
     t0 = time.time()

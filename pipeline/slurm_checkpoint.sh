@@ -45,7 +45,7 @@ source /global/common/software/desi/users/adematti/cosmodesi_environment.sh main
 export PYTHONPATH=:$SCRATCH/LSS/py:$PYTHONPATH
 
 # Move into the pipeline directory so relative imports work.
-cd "$(dirname "$0")"
+cd  /global/homes/s/smcole/DirectSHAM/pipeline
 
 python make_checkpoint.py \
     --reg        "${REG}" \
