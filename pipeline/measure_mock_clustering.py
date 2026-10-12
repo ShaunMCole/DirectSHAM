@@ -1,12 +1,13 @@
 """
 measure_mock_clustering.py — Apply sample selection cuts to a mock galaxy
 catalogue and its corresponding random catalogue, then measure the two-point
-correlation function multipoles ξ₀(s) and ξ₂(s) using pycorr directly.
+correlation function multipoles ξ₀(s) and ξ₂(s) using xirunpc.py from the
+DESI LSS pipeline.
 
 Unlike measure_clustering.py (which handles real data), this script uses:
   - Unit weights throughout (no PIP, no angular upweighting)
-  - No parent catalogue symlinks
-  - pycorr called directly in Python rather than via xirunpc.py subprocess
+  - No parent catalogue symlinks needed
+  - Same xirunpc.py subprocess approach as measure_clustering.py
 
 Must be run on a compute node (not a login node):
     salloc --nodes=1 --qos=interactive --constraint=cpu \\
@@ -15,18 +16,20 @@ Must be run on a compute node (not a login node):
 Usage examples
 --------------
 # Default sample, default mock parameters:
-python measure_mock_clustering.py --obs_seed 0 --sig_lgv 0.10
+python measure_mock_clustering.py --obs_seed 0 --sig_lgv 0.04
 
 # Custom magnitude and redshift cuts:
-python measure_mock_clustering.py --obs_seed 0 --sig_lgv 0.10 \\
+python measure_mock_clustering.py --obs_seed 0 --sig_lgv 0.04 \\
     --mr_cut -21.0 --zmin 0.1 --zmax 0.4
 
-# Measure both caps separately (default is to combine NGC+SGC):
-python measure_mock_clustering.py --obs_seed 0 --sig_lgv 0.10 --cap NGC
-python measure_mock_clustering.py --obs_seed 0 --sig_lgv 0.10 --cap SGC
+# Measure NGC and SGC separately:
+python measure_mock_clustering.py --obs_seed 0 --sig_lgv 0.04 --regions NGC
+python measure_mock_clustering.py --obs_seed 0 --sig_lgv 0.04 --regions SGC
 """
 
 import argparse
+import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -39,6 +42,10 @@ import fitsio
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import DATA_DIR, DEFAULT_OBS_SEED, DEFAULT_SIG_LGV
 from pipeline_utils import make_paths, setup_logging
+
+# LSS repo location
+LSS_SCRIPT = Path(os.environ.get("SCRATCH", "")) / "LSS/scripts/xirunpc.py"
+LSS_PY     = Path(os.environ.get("SCRATCH", "")) / "LSS/py"
 
 
 # =============================================================================
@@ -71,24 +78,21 @@ def parse_args():
         help="Maximum redshift (default: 0.42)",
     )
     p.add_argument(
-        "--cap", type=str, default="NGC+SGC",
-        choices=["NGC", "SGC", "NGC+SGC"],
-        help=(
-            "Galactic cap(s) to measure. NGC+SGC combines both "
-            "before measuring (default: NGC+SGC)"
-        ),
-    )
-    p.add_argument(
-        "--nthreads", type=int, default=64,
-        help="Number of threads for pycorr (default: 64)",
+        "--regions", nargs="+", default=["NGC", "SGC"],
+        choices=["NGC", "SGC"],
+        help="Galactic caps to measure and combine (default: NGC SGC)",
     )
     p.add_argument(
         "--outdir", type=str, default=None,
         help=(
-            "Output directory. Defaults to "
-            "DATA_DIR/clustering/mocks/seed{obs_seed}_sig_lgv{sig_lgv}/"
+            "Output directory for clustering results. "
+            "Defaults to DATA_DIR/clustering/mocks/seed{obs_seed}_sig_lgv{sig_lgv}/"
             "Mr{mr_cut}_z{zmin}-{zmax}/"
         ),
+    )
+    p.add_argument(
+        "--lss_script", type=str, default=None,
+        help=f"Path to xirunpc.py (default: {LSS_SCRIPT})",
     )
     return p.parse_args()
 
@@ -97,106 +101,28 @@ def parse_args():
 # Sample selection
 # =============================================================================
 
-def load_and_cut(path, mr_cut, zmin, zmax, log):
+def apply_cuts(infile, outfile, mr_cut, zmin, zmax, log):
     """
-    Read a catalogue, apply redshift and absolute magnitude cuts, and
-    return the trimmed astropy Table.
+    Apply redshift and absolute magnitude cuts to a catalogue and write
+    the trimmed version to outfile in the format xirunpc.py expects.
     """
-    log.info(f"Reading {path}")
-    data  = Table(fitsio.read(str(path)))
+    log.info(f"Reading {infile}")
+    data  = Table(fitsio.read(str(infile)))
+    log.info(f"  {len(data):,} rows")
+
     z_col = 'Z' if 'Z' in data.colnames else 'Zobs'
     mask  = (data[z_col] >= zmin) & (data[z_col] <= zmax)
     if 'ABSMAG_RP1' in data.colnames:
         mask &= (data['ABSMAG_RP1'] < mr_cut)
+
+    # xirunpc.py expects a WEIGHT column; add unit weights if not present.
     data_cut = data[mask]
-    log.info(f"  {len(data):,} → {len(data_cut):,} rows after cuts")
-    return data_cut
+    if 'WEIGHT' not in data_cut.colnames:
+        data_cut['WEIGHT'] = np.ones(len(data_cut), dtype=np.float32)
 
-
-def stack_caps(table_ngc, table_sgc, log):
-    """Vertically stack NGC and SGC catalogues."""
-    from astropy.table import vstack
-    combined = vstack([table_ngc, table_sgc], metadata_conflicts='silent')
-    log.info(f"  Combined NGC+SGC: {len(combined):,} rows")
-    return combined
-
-
-# =============================================================================
-# Pycorr measurement
-# =============================================================================
-
-def measure_xi(dat, ran, nthreads, log):
-    """
-    Measure ξ(s, μ) using pycorr with unit weights and return the
-    TwoPointCorrelationFunction result object.
-
-    Parameters
-    ----------
-    dat, ran : astropy Table
-        Must contain columns: Z (or Zobs), RA, DEC.
-    nthreads : int
-    log : logging.Logger
-    """
-    from pycorr import TwoPointCorrelationFunction
-    from cosmodesi_tools.catalog import CatalogMesh  # for FKP weights if needed
-
-    # Redshift column.
-    z_col_dat = 'Z'   if 'Z'   in dat.colnames else 'Zobs'
-    z_col_ran = 'Z'   if 'Z'   in ran.colnames else 'Zobs'
-
-    # Positions: (RA, DEC, Z) — pycorr converts to comoving using its own
-    # cosmology setting which should match Om0=0.313.
-    dat_pos = [dat['RA'], dat['DEC'], dat[z_col_dat]]
-    ran_pos = [ran['RA'], ran['DEC'], ran[z_col_ran]]
-
-    # Mock weights: unit for galaxies, 1/NMULT for randoms (already stored
-    # as WEIGHT in the formock random catalogue).
-    dat_weights = np.ones(len(dat))
-    ran_weights = ran['WEIGHT'] if 'WEIGHT' in ran.colnames else np.ones(len(ran))
-
-    # Logarithmic s bins matching those used in measure_clustering.py.
-    edges = np.logspace(np.log10(0.1), np.log10(150.0), 49)
-
-    log.info(
-        f"Running pycorr: {len(dat):,} galaxies  {len(ran):,} randoms  "
-        f"nthreads={nthreads}"
-    )
-    t0 = time.time()
-
-    result = TwoPointCorrelationFunction(
-        mode='smu',
-        edges=(edges, np.linspace(-1, 1, 201)),
-        data_positions1=dat_pos,
-        randoms_positions1=ran_pos,
-        data_weights1=dat_weights,
-        randoms_weights1=ran_weights,
-        position_type='rdd',   # (RA, DEC, distance/redshift)
-        dtype=np.float32,
-        nthreads=nthreads,
-        los='midpoint',
-        engine='corrfunc',
-    )
-    log.info(f"pycorr done in {time.time()-t0:.1f}s")
-    return result
-
-
-# =============================================================================
-# Output
-# =============================================================================
-
-def save_result(result, outpath, log):
-    """Save the pycorr result in its native format (.npy)."""
-    outpath.parent.mkdir(parents=True, exist_ok=True)
-    result.save(str(outpath))
-    log.info(f"Saved: {outpath}")
-
-    # Log the multipoles as a quick sanity check.
-    xi0 = result(ells=0, return_sep=False)
-    xi2 = result(ells=2, return_sep=False)
-    s   = result.sep
-    log.info("  s      xi0       xi2")
-    for i in range(0, len(s), max(1, len(s)//8)):
-        log.info(f"  {s[i]:6.2f}  {xi0[i]:+.4f}  {xi2[i]:+.4f}")
+    log.info(f"  After cuts: {len(data_cut):,} rows")
+    data_cut.write(str(outfile), format='fits', overwrite=True)
+    log.info(f"  Written: {outfile}")
 
 
 # =============================================================================
@@ -209,78 +135,107 @@ def main():
     log.info(
         f"obs_seed={args.obs_seed}  sig_lgv={args.sig_lgv}  "
         f"mr_cut={args.mr_cut}  zmin={args.zmin}  zmax={args.zmax}  "
-        f"cap={args.cap}  nthreads={args.nthreads}"
+        f"regions={args.regions}"
     )
+
+    lss_script = Path(args.lss_script) if args.lss_script else LSS_SCRIPT
+    if not lss_script.exists():
+        log.error(
+            f"xirunpc.py not found at {lss_script}. "
+            "Check that $SCRATCH/LSS is set up correctly."
+        )
+        sys.exit(1)
 
     # Resolve mock catalogue paths.
     paths = make_paths(obs_seed=args.obs_seed, sig_lgv=args.sig_lgv)
 
-    # Output directory.
+    # Output directories.
     sample_tag = f"Mr{args.mr_cut}_z{args.zmin}-{args.zmax}"
     if args.outdir:
         outdir = Path(args.outdir)
     else:
         mock_tag = f"seed{args.obs_seed:03d}_sig_lgv{args.sig_lgv:.2f}"
         outdir   = DATA_DIR / "clustering" / "mocks" / mock_tag / sample_tag
+
+    basedir = outdir / "catalogues"
+    basedir.mkdir(parents=True, exist_ok=True)
     outdir.mkdir(parents=True, exist_ok=True)
 
     # -------------------------------------------------------------------------
-    # Determine which caps to load
+    # Step 1: Apply sample selection cuts
     # -------------------------------------------------------------------------
-    caps_to_load = ["NGC", "SGC"] if args.cap == "NGC+SGC" else [args.cap]
+    log.info("=== Step 1: Applying sample selection cuts ===")
 
-    # -------------------------------------------------------------------------
-    # Load and cut mock galaxy catalogues
-    # -------------------------------------------------------------------------
-    log.info("=== Loading mock catalogues ===")
-    dat_tables = []
-    for cap in caps_to_load:
-        path = paths[f"mock_{cap}"]
-        if not path.exists():
+    for cap in args.regions:
+        # Mock galaxy catalogue
+        mock_path = paths[f"mock_{cap}"]
+        if not mock_path.exists():
             log.error(
-                f"Mock catalogue not found: {path}\n"
+                f"Mock catalogue not found: {mock_path}\n"
                 "Run make_mock.py and split_ngcsgc.py first."
             )
             sys.exit(1)
-        dat_tables.append(load_and_cut(path, args.mr_cut, args.zmin, args.zmax, log))
+        apply_cuts(
+            mock_path,
+            basedir / f"BGS_BRIGHT_{cap}_clustering.dat.fits",
+            args.mr_cut, args.zmin, args.zmax,
+            log,
+        )
 
-    # -------------------------------------------------------------------------
-    # Load and cut formock random catalogues
-    # -------------------------------------------------------------------------
-    log.info("=== Loading formock random catalogues ===")
-    ran_tables = []
-    for cap in caps_to_load:
-        path = paths[f"formock_ran_{cap}"]
-        if not path.exists():
+        # Formock random catalogue
+        ran_path = paths[f"formock_ran_{cap}"]
+        if not ran_path.exists():
             log.error(
-                f"Formock random catalogue not found: {path}\n"
+                f"Formock random catalogue not found: {ran_path}\n"
                 "Run make_mock.py and split_ngcsgc.py first."
             )
             sys.exit(1)
-        ran_tables.append(load_and_cut(path, args.mr_cut, args.zmin, args.zmax, log))
+        apply_cuts(
+            ran_path,
+            basedir / f"BGS_BRIGHT_{cap}_0_clustering.ran.fits",
+            args.mr_cut, args.zmin, args.zmax,
+            log,
+        )
 
     # -------------------------------------------------------------------------
-    # Stack caps if measuring NGC+SGC combined
+    # Step 2: Run xirunpc.py with unit weights and no angular upweighting
     # -------------------------------------------------------------------------
-    if args.cap == "NGC+SGC":
-        log.info("=== Stacking NGC + SGC ===")
-        dat = stack_caps(dat_tables[0], dat_tables[1], log)
-        ran = stack_caps(ran_tables[0], ran_tables[1], log)
-    else:
-        dat = dat_tables[0]
-        ran = ran_tables[0]
+    log.info("=== Step 2: Running xirunpc.py ===")
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f":{LSS_PY}:{env.get('PYTHONPATH', '')}"
+
+    cmd = [
+        "python", str(lss_script),
+        "--tracer",      "BGS_BRIGHT",
+        "--basedir",     str(basedir),
+        "--region",      *args.regions,
+        "--corr_type",   "smu",
+        "--njack",       "0",
+        "--weight_type", "default",   # unit weights, no PIP/angular upweighting
+        "--bin_type",    "log",
+        "--zlim",        str(args.zmin), str(args.zmax),
+        "--nran",        "1",
+        "--outdir",      str(outdir),
+    ]
+
+    log.info("Command: " + " ".join(cmd))
+    t0 = time.time()
+
+    result = subprocess.run(cmd, env=env)
+
+    if result.returncode != 0:
+        log.error(f"xirunpc.py failed with return code {result.returncode}")
+        sys.exit(result.returncode)
+
+    log.info(f"xirunpc.py completed in {time.time()-t0:.1f}s")
 
     # -------------------------------------------------------------------------
-    # Measure clustering
+    # Step 3: Report output files
     # -------------------------------------------------------------------------
-    log.info("=== Measuring clustering ===")
-    result = measure_xi(dat, ran, args.nthreads, log)
-
-    # -------------------------------------------------------------------------
-    # Save result
-    # -------------------------------------------------------------------------
-    outfile = outdir / f"xi_mock_{args.cap}_seed{args.obs_seed:03d}_sig_lgv{args.sig_lgv:.2f}.npy"
-    save_result(result, outfile, log)
+    log.info("=== Output files ===")
+    for f in sorted(outdir.glob("*.npy")):
+        log.info(f"  {f}")
 
     log.info(f"measure_mock_clustering.py complete.  Results in: {outdir}")
 

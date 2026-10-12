@@ -564,7 +564,7 @@ def main():
     else:
         tag    = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         outdir = (DATA_DIR / "diagnostics" /
-                  f"seed{args.obs_seed:03d}_sig_lgv{args.sig_lgv:.2f}_{tag}")
+                  f"{args.reg}_seed{args.obs_seed:03d}_sig_lgv{args.sig_lgv:.2f}_{tag}")
     outdir.mkdir(parents=True, exist_ok=True)
     log.info(f"Output directory: {outdir}")
 

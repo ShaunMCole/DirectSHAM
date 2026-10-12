@@ -7,8 +7,9 @@ into a single command-line tool.  It can split any combination of:
   --mocks      : combine mock_N + mock_S, split into mock_NGC + mock_SGC
   --formock    : combine formock_N + formock_S randoms, split into NGC + SGC
   --fordata    : split the combined fordata random catalogue into NGC + SGC
+  --data       : split the BGS data catalogue into NGC + SGC
 
-All three are run by default if no flags are given.
+All four are run by default if no flags are given.
 
 Usage examples
 --------------
@@ -239,6 +240,42 @@ def split_fordata_randoms(paths, log):
 
 
 # =============================================================================
+# Data catalogue split
+# =============================================================================
+
+def split_data_catalogue(log):
+    """Split the BGS data catalogue into NGC and SGC subsets."""
+    from config import BGS_CAT
+    import warnings
+    from astropy.io.fits.verify import VerifyWarning
+    warnings.filterwarnings("ignore", category=VerifyWarning)
+
+    log.info("=== Splitting BGS data catalogue into NGC / SGC ===")
+
+    path_in = BGS_CAT
+    if not path_in.exists():
+        log.error(f"BGS catalogue not found: {path_in}")
+        import sys; sys.exit(1)
+
+    log.info(f"Reading {path_in}")
+    dat = Table.read(str(path_in))
+    log.info(f"Read {len(dat):,} rows")
+
+    dat = add_cap_column(dat)
+
+    path_ngc = path_in.parent / (path_in.stem + "_NGC.fits")
+    path_sgc = path_in.parent / (path_in.stem + "_SGC.fits")
+
+    split_and_write(
+        dat, 'CAP', 'NGC', 'SGC',
+        path_ngc, path_sgc,
+        extra_meta={"STAGE": "split_ngcsgc"},
+        log=log,
+    )
+    del dat
+
+
+# =============================================================================
 # Entry point
 # =============================================================================
 
@@ -267,14 +304,18 @@ def parse_args():
         "--fordata", action="store_true",
         help="Split fordata random catalogue into NGC/SGC",
     )
+    p.add_argument(
+        "--data", action="store_true",
+        help="Split the BGS data catalogue into NGC/SGC subsets",
+    )
     return p.parse_args()
 
 
 def main():
     args = parse_args()
 
-    # If no task flags given, run all three.
-    run_all = not (args.mocks or args.formock or args.fordata)
+    # If no task flags given, run all four.
+    run_all = not (args.mocks or args.formock or args.fordata or args.data)
 
     log = setup_logging("split_ngcsgc")
 
@@ -300,6 +341,9 @@ def main():
 
     if args.fordata or run_all:
         split_fordata_randoms(paths, log)
+
+    if args.data or run_all:
+        split_data_catalogue(log)
 
     log.info("split_ngcsgc.py complete.")
 
