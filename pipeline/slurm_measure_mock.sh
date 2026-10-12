@@ -42,7 +42,6 @@ source /global/common/software/desi/users/adematti/cosmodesi_environment.sh main
 export PYTHONPATH=:$SCRATCH/LSS/py:$PYTHONPATH
 
 cd "$(dirname "$0")"
-mkdir -p logs
 
 python measure_mock_clustering.py \
     --obs_seed  "${OBS_SEED}" \

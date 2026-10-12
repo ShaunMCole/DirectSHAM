@@ -47,7 +47,6 @@ export PYTHONPATH=:$SCRATCH/LSS/py:$PYTHONPATH
 # Move into the pipeline directory so relative imports work.
 cd "$(dirname "$0")"
 
-
 python make_checkpoint.py \
     --reg        "${REG}" \
     --obs_seed   "${OBS_SEED}" \
