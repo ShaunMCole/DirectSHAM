@@ -20,7 +20,7 @@ DESI environment.
 
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from config import (
@@ -222,7 +222,7 @@ def write_fits_meta(header, params):
     """
     header["PIPE_VER"] = ("DirectSHAM-1.0", "Pipeline version")
     header["CREATED"]  = (
-        datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "UTC datetime this file was written",
     )
     for key, value in params.items():
@@ -313,7 +313,7 @@ def setup_logging(script_name, log_dir=None, level=logging.INFO):
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     log_file  = log_dir / f"{script_name}_{timestamp}.log"
 
     fmt = logging.Formatter(

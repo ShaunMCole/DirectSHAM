@@ -32,7 +32,7 @@ python inspect_mocks.py --reg N --obs_seed 0 --sig_lgv 0.04 --redshift --show
 
 import argparse
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -233,10 +233,10 @@ def plot_redshift(dat, mock, ran, ran_inp, reg, outdir, show, log):
     h_mock, _ = np.histogram(mock['Z'],      bins=z_bins_fine)
     h_ri,   _ = np.histogram(ran_inp['Z'],   bins=z_bins_fine)
 
-    h_dat  /= fsky_fordata
-    h_ran  /= (fsky_formock * nmult_formock)
-    h_mock /= fsky_formock
-    h_ri   /= (fsky_fordata * nmult_fordata)
+    h_dat  = h_dat.astype(float)  / fsky_fordata
+    h_ran  = h_ran.astype(float)  / (fsky_formock * nmult_formock)
+    h_mock = h_mock.astype(float) / fsky_formock
+    h_ri   = h_ri.astype(float)   / (fsky_fordata * nmult_fordata)
 
     def _safe_ratio(a, b):
         return np.where(b > 0, a / b, np.nan)
@@ -562,7 +562,7 @@ def main():
     if args.outdir:
         outdir = Path(args.outdir)
     else:
-        tag    = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        tag    = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         outdir = (DATA_DIR / "diagnostics" /
                   f"seed{args.obs_seed:03d}_sig_lgv{args.sig_lgv:.2f}_{tag}")
     outdir.mkdir(parents=True, exist_ok=True)
