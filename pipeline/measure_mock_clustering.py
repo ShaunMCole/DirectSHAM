@@ -107,10 +107,13 @@ def apply_cuts(infile, outfile, mr_cut, zmin, zmax, log):
     the trimmed version to outfile in the format xirunpc.py expects.
     """
     log.info(f"Reading {infile}")
-    data  = Table(fitsio.read(str(infile)))
+    data  = Table.read(str(infile))
     log.info(f"  {len(data):,} rows")
+    log.info(f"  Columns with Z: {[c for c in data.colnames if 'Z' in c or 'z' in c]}")
 
-    z_col = 'Z' if 'Z' in data.colnames else 'Zobs'
+    # Use Zobs (redshift space) for mocks; fall back to Z if not present.
+    # Never use Z for mocks even though it exists — that would be real space.
+    z_col = 'Zobs' if 'Zobs' in data.colnames else 'Z'
     mask  = (data[z_col] >= zmin) & (data[z_col] <= zmax)
     if 'ABSMAG_RP1' in data.colnames:
         mask &= (data['ABSMAG_RP1'] < mr_cut)
@@ -119,6 +122,14 @@ def apply_cuts(infile, outfile, mr_cut, zmin, zmax, log):
     data_cut = data[mask]
     if 'WEIGHT' not in data_cut.colnames:
         data_cut['WEIGHT'] = np.ones(len(data_cut), dtype=np.float32)
+
+    # xirunpc.py expects the redshift column to be named 'Z'.
+    # For mocks, Zobs is the redshift-space redshift; rename it to Z
+    # so that xirunpc.py uses redshift-space positions.
+    if 'Zobs' in data_cut.colnames:
+        if 'Z' in data_cut.colnames:
+            data_cut.remove_column('Z')   # remove real-space Z
+        data_cut.rename_column('Zobs', 'Z')
 
     log.info(f"  After cuts: {len(data_cut):,} rows")
     data_cut.write(str(outfile), format='fits', overwrite=True)

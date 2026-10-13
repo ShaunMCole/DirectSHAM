@@ -119,7 +119,7 @@ def apply_cuts(infile, outfile, mr_cut, zmin, zmax, is_dat, log):
     log.info(f"  {len(data):,} rows")
 
     # Detect redshift column.
-    z_col = 'Z' if 'Z' in data.colnames else 'Zobs'
+    z_col = 'Z' 
     mask  = (data[z_col] >= zmin) & (data[z_col] <= zmax)
 
     if 'ABSMAG_RP1' in data.colnames:
