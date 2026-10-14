@@ -13,21 +13,24 @@ parallel as separate SLURM jobs.
 
 Usage examples
 --------------
-# North, default scatter and seed:
+# North and South in one pass (recommended — reads Uchuu only once):
+python make_checkpoint.py --reg NS
+
+# North only:
 python make_checkpoint.py --reg N
 
-# South, sig_lgv=0.15, non-default seed:
-python make_checkpoint.py --reg S --sig_lgv 0.15 --obs_seed 1
+# South only:
+python make_checkpoint.py --reg S
 
-# North, different snapshot:
-python make_checkpoint.py --reg N --snapshot_index 43
+# Both regions, sig_lgv=0.15, non-default seed:
+python make_checkpoint.py --reg NS --sig_lgv 0.15 --obs_seed 1
 
 SLURM example
 -------------
 salloc --nodes=1 --qos=interactive --constraint=cpu \\
        --account=desi --mem=128GB --time=02:00:00
 source /global/common/software/desi/users/adematti/cosmodesi_environment.sh main
-python make_checkpoint.py --reg N --sig_lgv 0.10
+python make_checkpoint.py --reg NS --sig_lgv 0.10
 """
 
 # --- multiprocessing start method must be set before any other imports ---
@@ -64,12 +67,9 @@ from config import (
     NORTH_RA_MIN,
     NORTH_RA_MAX,
     NORTH_DEC_MIN,
-    cosmo_uchuu,  # Uchuu cosmology used ONLY for distance→redshift conversion
+    cosmo_uchuu,
 )
 from pipeline_utils import make_paths, write_fits_meta, setup_logging
-
-# MockCode is imported after argument parsing so that the fork start method
-# is already in effect before any multiprocessing objects are created.
 
 
 # =============================================================================
@@ -82,8 +82,11 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument(
-        "--reg", required=True, choices=["N", "S"],
-        help="Photometric region to process: N (North) or S (South)",
+        "--reg", required=True, choices=["N", "S", "NS"],
+        help=(
+            "Photometric region to process: N (North), S (South), or "
+            "NS (both in one pass — reads Uchuu only once, recommended)."
+        ),
     )
     p.add_argument(
         "--obs_seed", type=int, default=DEFAULT_OBS_SEED,
@@ -103,27 +106,25 @@ def parse_args():
         "--min_vpeak", type=float, default=MIN_VPEAK,
         help=(
             f"Discard subhalos with Vpeak below this value [km/s]. "
-            f"Sets the minimum redshift at which the mock is complete. "
             f"(default: {MIN_VPEAK})"
         ),
     )
     p.add_argument(
         "--n_neigh_vpeak", type=int, default=N_NEIGH_VPEAK,
         help=(
-            f"Number of Vpeak neighbours used to compute the secondary "
-            f"matching statistic FracZpeak. (default: {N_NEIGH_VPEAK})"
+            f"Number of Vpeak neighbours used to compute FracZpeak. "
+            f"(default: {N_NEIGH_VPEAK})"
         ),
     )
     p.add_argument(
         "--snapshot_index", type=int, default=SNAPSHOT_INDEX,
         help=(
-            f"Uchuu snapshot index to use. Determines the simulation "
-            f"redshift. (default: {SNAPSHOT_INDEX}, z≈0.19)"
+            f"Uchuu snapshot index to use. (default: {SNAPSHOT_INDEX}, z≈0.19)"
         ),
     )
     p.add_argument(
         "--plot", action="store_true",
-        help="Produce diagnostic plots of the Vpeak scatter (requires matplotlib).",
+        help="Produce diagnostic plots of the Vpeak scatter.",
     )
     return p.parse_args()
 
@@ -133,13 +134,6 @@ def parse_args():
 # =============================================================================
 
 def observer_position(obs_seed, lbox, log):
-    """
-    Return the (x, y, z) position of the observer in the simulation box.
-
-    seed=0  → centre of the box.
-    seed>0  → random position drawn with a fixed offset from obs_seed so
-              that it differs from the direction seed used elsewhere.
-    """
     if obs_seed == 0:
         xobs = yobs = zobs = lbox / 2.0
         log.info(f"Observer at box centre: ({xobs}, {yobs}, {zobs})")
@@ -158,14 +152,6 @@ def observer_position(obs_seed, lbox, log):
 # =============================================================================
 
 def add_sky_coords(subhalos, obs_seed, log):
-    """
-    Rotate positions and velocities by a random Euler rotation, then compute
-    RA, DEC, cosmological redshift (Zu) and observed redshift (Zobs) for
-    each subhalo.  Concentration (Rvir/rs) is also computed here and the
-    raw Rvir, rs, and velocity columns are dropped to save memory.
-
-    Modifies subhalos in place and returns it.
-    """
     import MockCode as mc
 
     t0 = time.time()
@@ -173,14 +159,12 @@ def add_sky_coords(subhalos, obs_seed, log):
     log.info(f"Euler angles: phi={phi:.4f}  theta={theta:.4f}  psi={psi:.4f}")
     R = mc.euler_rotation_matrix(phi, theta, psi)
 
-    # Rotate velocities
     vxr = R[0,0]*subhalos['vx'] + R[0,1]*subhalos['vy'] + R[0,2]*subhalos['vz']
     vyr = R[1,0]*subhalos['vx'] + R[1,1]*subhalos['vy'] + R[1,2]*subhalos['vz']
     vzr = R[2,0]*subhalos['vx'] + R[2,1]*subhalos['vy'] + R[2,2]*subhalos['vz']
     subhalos['vx'] = vxr;  subhalos['vy'] = vyr;  subhalos['vz'] = vzr
     del vxr, vyr, vzr
 
-    # Rotate positions
     xr = R[0,0]*subhalos['x'] + R[0,1]*subhalos['y'] + R[0,2]*subhalos['z']
     yr = R[1,0]*subhalos['x'] + R[1,1]*subhalos['y'] + R[1,2]*subhalos['z']
     zr = R[2,0]*subhalos['x'] + R[2,1]*subhalos['y'] + R[2,2]*subhalos['z']
@@ -194,32 +178,24 @@ def add_sky_coords(subhalos, obs_seed, log):
     subhalos['DEC']  = np.degrees(np.arcsin(subhalos['z'] / dist))
     subhalos['RA']   = np.degrees(np.arctan2(subhalos['y'], subhalos['x'])) % 360
 
-    # Radial velocity / c
-    c_light = 299792.458  # km/s
+    c_light = 299792.458
     vr_c = (
         subhalos['x']*subhalos['vx'] +
         subhalos['y']*subhalos['vy'] +
         subhalos['z']*subhalos['vz']
     ) / (c_light * dist)
 
-    # Drop velocities — no longer needed
     for col in ('vx', 'vy', 'vz'):
         subhalos.remove_column(col)
     gc.collect()
 
-    # Concentration
     subhalos['conc'] = subhalos['Rvir'] / subhalos['rs']
     subhalos.remove_column('Rvir')
     subhalos.remove_column('rs')
     gc.collect()
 
-    # Redshift lookup table: comoving distance → redshift.
-    # Uses the Uchuu cosmology (Om0=0.3089) because Uchuu particle positions
-    # are defined in that cosmology.  Downstream scripts treat the resulting
-    # redshifts as observed quantities and convert back to distances using the
-    # standard analysis cosmology (Om0=0.313), exactly as is done for real data.
     z_grid  = np.linspace(0.0, 1.0, 10000)
-    Dc_grid = cosmo_uchuu.comoving_distance(z_grid).value  # Mpc/h
+    Dc_grid = cosmo_uchuu.comoving_distance(z_grid).value
     z_of_Dc = interp1d(Dc_grid, z_grid, bounds_error=False, fill_value="extrapolate")
 
     subhalos['Zu']   = z_of_Dc(dist)
@@ -237,9 +213,7 @@ def add_sky_coords(subhalos, obs_seed, log):
 def apply_sky_mask(subhalos, reg, log):
     """
     Restrict subhalos to the DESI DR2 survey footprint for the given region.
-
-    North: inside the official DESI mask AND RA∈[85,305] AND DEC>32.375
-    South: inside the official DESI mask AND NOT North
+    Returns a new table (does not modify subhalos in place).
     """
     t0 = time.time()
     log.info(f"Applying DESI DR2 sky mask for region {reg}")
@@ -257,10 +231,41 @@ def apply_sky_mask(subhalos, reg, log):
     else:
         mask = in_desi & ~north
 
-    del in_desi, north, tiles
-    subhalos = subhalos[mask]
-    log.info(f"After mask: {len(subhalos):,} subhalos  ({time.time()-t0:.1f}s)")
-    return subhalos
+    result = subhalos[mask]
+    log.info(f"After mask: {len(result):,} subhalos  ({time.time()-t0:.1f}s)")
+    return result
+
+
+# =============================================================================
+# Write one checkpoint file
+# =============================================================================
+
+def write_checkpoint(subhalos_reg, reg, args, redshift, out_path, log):
+    """Write a single region's checkpoint file with metadata."""
+    if 'id' in subhalos_reg.colnames:
+        subhalos_reg.rename_column('id', 'ID')
+
+    write_fits_meta(subhalos_reg.meta, {
+        "STAGE":      "make_checkpoint",
+        "REG":        reg,
+        "OBS_SEED":   args.obs_seed,
+        "SIG_LGV":    args.sig_lgv,
+        "MIN_VPEAK":  args.min_vpeak,
+        "NNVPEAK":    args.n_neigh_vpeak,
+        "SNAPIDX":    args.snapshot_index,
+        "SNAPZ":      redshift,
+        "LBOX":       LBOX,
+        "FRAC_BOX":   FRAC_BOX,
+        "RAMIN":      NORTH_RA_MIN,
+        "RAMAX":      NORTH_RA_MAX,
+        "DECMIN":     NORTH_DEC_MIN,
+    })
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    t0 = time.time()
+    subhalos_reg.write(str(out_path), overwrite=True)
+    log.info(f"Written checkpoint ({len(subhalos_reg):,} subhalos) in {time.time()-t0:.1f}s")
+    log.info(f"→ {out_path}")
 
 
 # =============================================================================
@@ -270,7 +275,6 @@ def apply_sky_mask(subhalos, reg, log):
 def main():
     args = parse_args()
 
-    # Import MockCode here (after fork start method is set and args parsed).
     import MockCode as mc
 
     log = setup_logging("make_checkpoint")
@@ -280,7 +284,6 @@ def main():
         f"snapshot_index={args.snapshot_index}"
     )
 
-    # Check snapshot index is valid
     if args.snapshot_index not in mc.redshift_table:
         log.error(
             f"snapshot_index={args.snapshot_index} not in redshift_table. "
@@ -290,16 +293,19 @@ def main():
     redshift = mc.redshift_table[args.snapshot_index]
     log.info(f"Snapshot {args.snapshot_index} → z={redshift}")
 
-    # Output path
-    paths = make_paths(
-        reg=args.reg,
-        obs_seed=args.obs_seed,
-        sig_lgv=args.sig_lgv,
-        min_vpeak=args.min_vpeak,
-        n_neigh_vpeak=args.n_neigh_vpeak,
-    )
-    out_path = paths["subhalo_checkpoint"]
-    log.info(f"Output checkpoint: {out_path}")
+    # Determine which regions to process and their output paths.
+    regs = ['N', 'S'] if args.reg == 'NS' else [args.reg]
+    out_paths = {}
+    for reg in regs:
+        paths = make_paths(
+            reg=reg,
+            obs_seed=args.obs_seed,
+            sig_lgv=args.sig_lgv,
+            min_vpeak=args.min_vpeak,
+            n_neigh_vpeak=args.n_neigh_vpeak,
+        )
+        out_paths[reg] = paths["subhalo_checkpoint"]
+        log.info(f"Output checkpoint ({reg}): {out_paths[reg]}")
 
     # -------------------------------------------------------------------------
     # 1. Read full Uchuu catalogue in parallel
@@ -355,39 +361,15 @@ def main():
     log.info(f"Distance-dependent Vpeak cut: {len(subhalos):,} remain ({time.time()-t0:.1f}s)")
 
     # -------------------------------------------------------------------------
-    # 4. Apply sky mask
+    # 4. Apply sky mask and write — once per region
     # -------------------------------------------------------------------------
-    subhalos = apply_sky_mask(subhalos, args.reg, log)
+    for reg in regs:
+        log.info(f"=== Processing region {reg} ===")
+        subhalos_reg = apply_sky_mask(subhalos, reg, log)
+        write_checkpoint(subhalos_reg, reg, args, redshift, out_paths[reg], log)
+        del subhalos_reg
+        gc.collect()
 
-    # Rename 'id' → 'ID' for consistency with downstream scripts
-    if 'id' in subhalos.colnames:
-        subhalos.rename_column('id', 'ID')
-
-    # -------------------------------------------------------------------------
-    # 5. Write checkpoint file with metadata
-    # -------------------------------------------------------------------------
-    write_fits_meta(subhalos.meta, {
-        "STAGE":      "make_checkpoint",
-        "REG":        args.reg,
-        "OBS_SEED":   args.obs_seed,
-        "SIG_LGV":    args.sig_lgv,
-        "MIN_VPEAK":  args.min_vpeak,
-        "NNVPEAK":    args.n_neigh_vpeak,
-        "SNAPIDX":    args.snapshot_index,
-        "SNAPZ":      redshift,
-        "LBOX":       LBOX,
-        "FRAC_BOX":   FRAC_BOX,
-        # Store mask boundaries so downstream scripts can verify compatibility
-        "RAMIN":      NORTH_RA_MIN,
-        "RAMAX":      NORTH_RA_MAX,
-        "DECMIN":     NORTH_DEC_MIN,
-    })
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    t0 = time.time()
-    subhalos.write(str(out_path), overwrite=True)
-    log.info(f"Written checkpoint ({len(subhalos):,} subhalos) in {time.time()-t0:.1f}s")
-    log.info(f"→ {out_path}")
     log.info("make_checkpoint.py complete.")
 
 

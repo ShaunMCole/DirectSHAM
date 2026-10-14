@@ -19,9 +19,9 @@ cd ~/DirectSHAM/pipeline
 OBS_SEED=0
 
 # sig_lgv values to scan
-SIG_LGV_VALUES=(0.06 0.08)
+SIG_LGV_VALUES=(0.08)
 
-# 5 samples: mr_cut zmin zmax
+# 5 samples: mr_cut zmin zmax 
 SAMPLES=(
     "-22.0 0.02 0.50"
     "-21.5 0.02 0.42"
@@ -35,19 +35,21 @@ for SIG_LGV in "${SIG_LGV_VALUES[@]}"; do
     echo "sig_lgv=${SIG_LGV}"
     echo "============================================================"
 
-    echo "--- Making checkpoint ---"
-    python make_checkpoint.py --reg N --obs_seed $OBS_SEED --sig_lgv $SIG_LGV
-    python make_checkpoint.py --reg S --obs_seed $OBS_SEED --sig_lgv $SIG_LGV
+    echo "--- Making checkpoint (N and S) ---"
+    python make_checkpoint.py --reg NS --obs_seed $OBS_SEED --sig_lgv $SIG_LGV
+
+    echo "--- Making mock (N must come before S) ---"
+    python make_mock.py --reg N --obs_seed $OBS_SEED --sig_lgv $SIG_LGV
+    python make_mock.py --reg S --obs_seed $OBS_SEED --sig_lgv $SIG_LGV
+
+    echo "--- Splitting into NGC/SGC ---"
+    python split_ngcsgc.py --obs_seed $OBS_SEED --sig_lgv $SIG_LGV
 
     for SAMPLE in "${SAMPLES[@]}"; do
         read MR ZMIN ZMAX <<< "$SAMPLE"
         echo "------------------------------------------------------------"
         echo "Sample: Mr < $MR  z = $ZMIN - $ZMAX  sig_lgv=$SIG_LGV"
         echo "------------------------------------------------------------"
-
-        echo "--- Making mock ---"
-        python make_mock.py --obs_seed $OBS_SEED --sig_lgv $SIG_LGV \
-            --mr_cut $MR --zmin $ZMIN --zmax $ZMAX
 
         echo "--- Measuring mock clustering ---"
         python measure_mock_clustering.py \
