@@ -20,7 +20,7 @@ python compare_clustering_5panel.py
 python compare_clustering_5panel.py --sig_lgv 0.04 --obs_seed 0
 
 # Compare two scatter values:
-python compare_clustering_5panel.py --sig_lgv 0.04 0.10
+python compare_clustering_5panel.py --sig_lgv 0.04 0.06
 
 # Save the figure:
 python compare_clustering_5panel.py --savefig 5panel_comparison.png
@@ -104,7 +104,6 @@ def parse_args():
 # =============================================================================
 
 def data_file(mr_cut, zmin, zmax, njack):
-    """Return path to the data GCcomb clustering .npy file."""
     sample_tag = f"Mr{mr_cut}_z{zmin}-{zmax}"
     smu_dir    = DATA_DIR / "clustering" / "data" / sample_tag / "smu"
     pattern    = f"allcounts_BGS_BRIGHT_GCcomb_{zmin}_{zmax}_pip_angular_bitwise_log_njack{njack}_nran1_split20.npy"
@@ -112,7 +111,6 @@ def data_file(mr_cut, zmin, zmax, njack):
 
 
 def mock_file(mr_cut, zmin, zmax, obs_seed, sig_lgv):
-    """Return path to the mock GCcomb clustering .npy file."""
     sample_tag = f"Mr{mr_cut}_z{zmin}-{zmax}"
     mock_tag   = f"seed{obs_seed:03d}_sig_lgv{sig_lgv:.2f}"
     smu_dir    = DATA_DIR / "clustering" / "mocks" / mock_tag / sample_tag / "smu"
@@ -121,7 +119,7 @@ def mock_file(mr_cut, zmin, zmax, obs_seed, sig_lgv):
 
 
 # =============================================================================
-# Loading and extraction (same logic as compare_clustering.py)
+# Loading and extraction
 # =============================================================================
 
 def load_result(path, log):
@@ -136,11 +134,9 @@ def load_result(path, log):
 
 
 def extract_multipoles(result, ells=(0, 2)):
-    """Extract s, xi_dict, err_dict, good, has_cov from a pycorr result."""
     s = result.sep
     if s.ndim == 2:
         s = np.nanmean(s, axis=1)
-
     try:
         xis, cov = result.get_corr(ells=tuple(ells), return_cov=True)
         xis  = np.atleast_2d(xis)
@@ -153,12 +149,10 @@ def extract_multipoles(result, ells=(0, 2)):
         ns       = xis.shape[1]
         err_dict = {ell: np.zeros(ns) for ell in ells}
         has_cov  = False
-
     xi_dict = {ell: xis[i] for i, ell in enumerate(ells)}
     good    = np.isfinite(s) & (s > 0)
     for xi in xi_dict.values():
         good &= np.isfinite(xi)
-
     return s, xi_dict, err_dict, good, has_cov
 
 
@@ -166,11 +160,9 @@ def compute_chi2(s_dat, xi_dat, err_dat, s_mock, xi_mock,
                  ells, smin, smax, use_jackknife=False):
     def _interp(s_from, xi_from, s_to):
         return np.interp(s_to, s_from, xi_from)
-
     fit   = (s_dat >= smin) & (s_dat <= smax)
     s_fit = s_dat[fit]
     ndof  = fit.sum() * len(ells)
-
     residuals, weights = [], []
     for ell in ells:
         xi_d = xi_dat[ell][fit]
@@ -182,7 +174,6 @@ def compute_chi2(s_dat, xi_dat, err_dat, s_mock, xi_mock,
             weights.append(err)
         else:
             weights.append(np.ones(fit.sum()))
-
     delta = np.concatenate(residuals)
     w     = np.concatenate(weights)
     chi2  = float(np.dot(delta / w, delta / w))
@@ -204,11 +195,9 @@ def main():
     }
     mock_ls = {0: '-', 2: '--'}
 
-    # One colour per sig_lgv value.
     colours = cm.tab10(np.linspace(0, 0.9, max(len(args.sig_lgv), 1)))
 
     fig, axes = plt.subplots(3, 2, figsize=(12, 15))
-    # Hide the unused bottom-right panel.
     axes[2, 1].set_visible(False)
 
     for sample, (row, col) in zip(SAMPLES, LAYOUT):
@@ -216,8 +205,8 @@ def main():
         mr  = sample['mr_cut']
         z0  = sample['zmin']
         z1  = sample['zmax']
+        is_top_left = (row == 0 and col == 0)
 
-        # Determine ylim from mr_cut (brighter = larger amplitude).
         ymax = {-22.0: 180, -21.5: 120, -21.0: 90, -20.5: 75, -20.0: 70}.get(mr, 120)
         ymin = -ymax * 0.85
         xlim = args.xlim
@@ -241,19 +230,21 @@ def main():
         )
         s_d = s_dat[good_dat]
 
+        data_handles = []
         for ell in ells:
             fmt, c, lbl = data_styles[ell]
             y    = s_d**2 * xi_dat[ell][good_dat]
             yerr = s_d**2 * err_dat[ell][good_dat]
             if has_cov and np.any(err_dat[ell][good_dat] > 0):
-                ax.errorbar(s_d, y, yerr=yerr,
-                            fmt=fmt, color=c, ms=4, capsize=2, lw=0.8,
-                            zorder=10, label=lbl if (row == 0 and col == 0) else None)
+                h = ax.errorbar(s_d, y, yerr=yerr,
+                                fmt=fmt, color=c, ms=4, capsize=2, lw=0.8,
+                                zorder=10, label=lbl)
             else:
-                ax.plot(s_d, y, fmt, color=c, ms=4, zorder=10,
-                        label=lbl if (row == 0 and col == 0) else None)
+                h, = ax.plot(s_d, y, fmt, color=c, ms=4, zorder=10, label=lbl)
+            data_handles.append(h)
 
         # --- Mocks ---
+        mock_handles = []
         for sig_lgv, mock_col in zip(args.sig_lgv, colours):
             mf = mock_file(mr, z0, z1, args.obs_seed, sig_lgv)
             mock_result = load_result(mf, log)
@@ -268,23 +259,46 @@ def main():
             )
             log.info(
                 f"Mr{mr} z{z0}-{z1}  sig_lgv={sig_lgv}  "
-                f"chi2={chi2:.1f}  ndof={ndof}  chi2/ndof={chi2/ndof:.2f}"
+                f"chi2={chi2:.1f}  ndof={ndof}  chi2/df={chi2/ndof:.2f}"
             )
 
             s_ = s_m[good_m]
-            mock_label = f"sig_lgv={sig_lgv}  $\\chi^2$/ndof={chi2/ndof:.1f}"
+            mock_label = f"sig_lgv={sig_lgv}  $\\chi^2$/df={chi2/ndof:.1f}"
             first = True
             for ell in ells:
-                lbl = mock_label if first else None
+                lbl = mock_label if first else f"  $\\xi_{ell}$"
                 first = False
-                ax.plot(s_, s_**2 * xi_m[ell][good_m],
-                        lw=1.5, color=mock_col, ls=mock_ls[ell],
-                        label=lbl if (row == 0 and col == 1) else None)
-            # Add chi2 as text in corner of each panel.
-            ax.text(0.97, 0.97,
-                    f"$\\chi^2$/ndof={chi2/ndof:.1f}",
-                    transform=ax.transAxes, fontsize=8,
-                    ha='right', va='top', color=mock_col)
+                h, = ax.plot(s_, s_**2 * xi_m[ell][good_m],
+                             lw=1.5, color=mock_col, ls=mock_ls[ell],
+                             label=lbl)
+            mock_handles.append(ax.get_lines()[-2])  # solid line handle
+
+        # --- Legends ---
+        # Data legend: bottom-left on top-left panel, upper-left elsewhere
+        mock_loc = 'upper left'
+
+        if is_top_left:
+            data_legend = ax.legend(handles=data_handles, fontsize=7,
+                            loc='lower left', framealpha=0.8)
+            ax.add_artist(data_legend)
+        # Mock legend on every panel
+        mock_legend_handles = []
+        mock_legend_labels  = []
+        for sig_lgv, mock_col in zip(args.sig_lgv, colours):
+            mf = mock_file(mr, z0, z1, args.obs_seed, sig_lgv)
+            if not Path(mf).exists():
+                continue
+            # recompute chi2 label — already logged above, just rebuild label
+            # Use the lines already on the plot
+            pass
+
+        # Simpler: just use ax.legend for mock lines by collecting from plot
+        all_lines  = ax.get_lines()
+        mock_lines = [l for l in all_lines if l.get_linestyle() in ['-', '--']
+                      and l.get_label().startswith('sig_lgv')]
+        # Get only solid lines (one per sig_lgv) for the legend entry
+        solid_mock = [l for l in mock_lines if l.get_linestyle() == '-']
+        ax.legend(handles=solid_mock, fontsize=7, loc=mock_loc, framealpha=0.8)
 
         ax.axhline(0, color='k', lw=0.7, ls='--')
         ax.set_xscale('log')
@@ -293,11 +307,6 @@ def main():
         ax.set_xlabel(r'$s$ [Mpc/$h$]', fontsize=9)
         ax.set_ylabel(r'$s^2\xi_\ell(s)$ [Mpc$^2h^{-2}$]', fontsize=9)
         ax.tick_params(labelsize=8)
-
-    # Shared legend in the top-left panel.
-    axes[0, 0].legend(fontsize=7, loc='upper left')
-    # Mock legend in the top-right panel.
-    axes[0, 1].legend(fontsize=7, loc='upper left')
 
     fig.suptitle(
         f"BGS DR2 data vs Uchuu mocks  (obs_seed={args.obs_seed})",
