@@ -16,15 +16,15 @@ Must be run on a compute node (not a login node):
 Usage examples
 --------------
 # Default sample, default mock parameters:
-python measure_mock_clustering.py --obs_seed 0 --sig_lgv 0.04
+python measure_mock_clustering.py --obs_seed 0
 
 # Custom magnitude and redshift cuts:
-python measure_mock_clustering.py --obs_seed 0 --sig_lgv 0.04 \\
+python measure_mock_clustering.py --obs_seed 0 \\
     --mr_cut -21.0 --zmin 0.1 --zmax 0.4
 
 # Measure NGC and SGC separately:
-python measure_mock_clustering.py --obs_seed 0 --sig_lgv 0.04 --regions NGC
-python measure_mock_clustering.py --obs_seed 0 --sig_lgv 0.04 --regions SGC
+python measure_mock_clustering.py --obs_seed 0 --regions NGC
+python measure_mock_clustering.py --obs_seed 0 --regions SGC
 """
 
 import argparse
@@ -40,7 +40,7 @@ import fitsio
 
 # Pipeline modules
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import DATA_DIR, DEFAULT_OBS_SEED, DEFAULT_SIG_LGV
+from config import DATA_DIR, DEFAULT_OBS_SEED, DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE
 from pipeline_utils import make_paths, setup_logging
 
 # LSS repo location
@@ -62,8 +62,12 @@ def parse_args():
         help=f"Observer position seed (default: {DEFAULT_OBS_SEED})",
     )
     p.add_argument(
-        "--sig_lgv", type=float, default=DEFAULT_SIG_LGV,
-        help=f"log10(Vpeak) scatter in dex (default: {DEFAULT_SIG_LGV})",
+        "--sig_lgv_ref", type=float, default=DEFAULT_SIG_LGV_REF,
+        help=f"log10(Vpeak) scatter at pivot Vpeak (default: {DEFAULT_SIG_LGV_REF})",
+    )
+    p.add_argument(
+        "--sig_lgv_slope", type=float, default=DEFAULT_SIG_LGV_SLOPE,
+        help=f"Gradient of scatter with log10(Vpeak) (default: {DEFAULT_SIG_LGV_SLOPE})",
     )
     p.add_argument(
         "--mr_cut", type=float, default=-21.5,
@@ -144,7 +148,8 @@ def main():
     args = parse_args()
     log  = setup_logging("measure_mock_clustering")
     log.info(
-        f"obs_seed={args.obs_seed}  sig_lgv={args.sig_lgv}  "
+        f"obs_seed={args.obs_seed}  sig_lgv_ref={args.sig_lgv_ref}  "
+        f"sig_lgv_slope={args.sig_lgv_slope}  "
         f"mr_cut={args.mr_cut}  zmin={args.zmin}  zmax={args.zmax}  "
         f"regions={args.regions}"
     )
@@ -158,14 +163,15 @@ def main():
         sys.exit(1)
 
     # Resolve mock catalogue paths.
-    paths = make_paths(obs_seed=args.obs_seed, sig_lgv=args.sig_lgv)
+    paths = make_paths(obs_seed=args.obs_seed, sig_lgv_ref=args.sig_lgv_ref,
+                       sig_lgv_slope=args.sig_lgv_slope)
 
     # Output directories.
     sample_tag = f"Mr{args.mr_cut}_z{args.zmin}-{args.zmax}"
     if args.outdir:
         outdir = Path(args.outdir)
     else:
-        mock_tag = f"seed{args.obs_seed:03d}_sig_lgv{args.sig_lgv:.2f}"
+        mock_tag = f"seed{args.obs_seed:03d}_sig_lgv{args.sig_lgv_ref:.2f}_{args.sig_lgv_slope:.2f}"
         outdir   = DATA_DIR / "clustering" / "mocks" / mock_tag / sample_tag
 
     basedir = outdir / "catalogues"

@@ -13,13 +13,13 @@ downsampled to match the North NMULT value.
 Usage examples
 --------------
 # North first (always):
-python make_mock.py --reg N --obs_seed 0 --sig_lgv 0.10
+python make_mock.py --reg N --obs_seed 0
 
 # Then South:
-python make_mock.py --reg S --obs_seed 0 --sig_lgv 0.10
+python make_mock.py --reg S --obs_seed 0
 
 # Skip rewriting the formock randoms (e.g. rerunning SHAM only):
-python make_mock.py --reg N --obs_seed 0 --sig_lgv 0.10 --skip_randoms
+python make_mock.py --reg N --obs_seed 0 --skip_randoms
 """
 
 import argparse
@@ -37,7 +37,8 @@ from scipy.interpolate import interp1d
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import (
     DEFAULT_OBS_SEED,
-    DEFAULT_SIG_LGV,
+    DEFAULT_SIG_LGV_REF,
+    DEFAULT_SIG_LGV_SLOPE,
     MIN_VPEAK,
     N_NEIGH_VPEAK,
     N_NEIGH_LUM,
@@ -71,8 +72,12 @@ def parse_args():
         help=f"Observer position seed (default: {DEFAULT_OBS_SEED})",
     )
     p.add_argument(
-        "--sig_lgv", type=float, default=DEFAULT_SIG_LGV,
-        help=f"log10(Vpeak) scatter in dex (default: {DEFAULT_SIG_LGV})",
+        "--sig_lgv_ref", type=float, default=DEFAULT_SIG_LGV_REF,
+        help=f"log10(Vpeak) scatter at pivot Vpeak (default: {DEFAULT_SIG_LGV_REF})",
+    )
+    p.add_argument(
+        "--sig_lgv_slope", type=float, default=DEFAULT_SIG_LGV_SLOPE,
+        help=f"Gradient of scatter with log10(Vpeak) (default: {DEFAULT_SIG_LGV_SLOPE})",
     )
     p.add_argument(
         "--min_vpeak", type=float, default=MIN_VPEAK,
@@ -122,11 +127,12 @@ def load_checkpoint(paths, args, log):
     check_fits_meta(
         subhalos.meta,
         {
-            "REG":       args.reg,
-            "OBS_SEED":  args.obs_seed,
-            "SIG_LGV":   args.sig_lgv,
-            "MIN_VPEAK": args.min_vpeak,
-            "NNVPEAK":   args.n_neigh_vpeak,
+            "REG":        args.reg,
+            "OBS_SEED":   args.obs_seed,
+            "SIGLGVREF":  args.sig_lgv_ref,
+            "SIGLGVSLP":  args.sig_lgv_slope,
+            "MIN_VPEAK":  args.min_vpeak,
+            "NNVPEAK":    args.n_neigh_vpeak,
         },
         strict=True,
     )
@@ -402,7 +408,7 @@ def _make_symlink_if_useful(path_ran_out, args, log):
 
     # Build a descriptive symlink name that encodes sig_lgv and obs_seed.
     stem    = RANCAT_FORMOCK_TEMPLATE.format(date=DATA_DATE, reg=args.reg)
-    stem    = stem.replace(".fits", f"_seed{args.obs_seed:03d}_sig_lgv{args.sig_lgv:.2f}.fits")
+    stem    = stem.replace(".fits", f"_seed{args.obs_seed:03d}_sig_lgv{args.sig_lgv_ref:.2f}_{args.sig_lgv_slope:.2f}.fits")
     symlink = path_ran_out.parent / stem
 
     if symlink.exists() or symlink.is_symlink():
@@ -425,7 +431,8 @@ def main():
     args = parse_args()
     log  = setup_logging("make_mock")
     log.info(
-        f"reg={args.reg}  obs_seed={args.obs_seed}  sig_lgv={args.sig_lgv}  "
+        f"reg={args.reg}  obs_seed={args.obs_seed}  "
+        f"sig_lgv_ref={args.sig_lgv_ref}  sig_lgv_slope={args.sig_lgv_slope}  "
         f"n_neigh_lum={args.n_neigh_lum}  n_zbins={args.n_zbins}  "
         f"skip_randoms={args.skip_randoms}"
     )
@@ -434,7 +441,8 @@ def main():
     paths = make_paths(
         reg=args.reg,
         obs_seed=args.obs_seed,
-        sig_lgv=args.sig_lgv,
+        sig_lgv_ref=args.sig_lgv_ref,
+        sig_lgv_slope=args.sig_lgv_slope,
         min_vpeak=args.min_vpeak,
         n_neigh_vpeak=args.n_neigh_vpeak,
     )
@@ -527,7 +535,7 @@ def main():
 
         # Remove internal columns not needed in the output file.
         ran_to_write = randoms.copy()
-        for col in ('reg', 'v', 'zmin', 'zmax', 'ID', 'TARGETID'):
+        for col in ('v', 'ID'):
             if col in ran_to_write.colnames:
                 ran_to_write.remove_column(col)
 
@@ -576,7 +584,8 @@ def main():
         "STAGE":      "make_mock",
         "REG":        args.reg,
         "OBS_SEED":   args.obs_seed,
-        "SIG_LGV":    args.sig_lgv,
+        "SIGLGVREF":  args.sig_lgv_ref,
+        "SIGLGVSLP":  args.sig_lgv_slope,
         "MIN_VPEAK":  args.min_vpeak,
         "NNVPEAK":    args.n_neigh_vpeak,
         "NNLUM":      args.n_neigh_lum,

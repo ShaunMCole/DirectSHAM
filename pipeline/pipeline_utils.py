@@ -48,7 +48,8 @@ from config import (
 def make_paths(
     reg=None,
     obs_seed=None,
-    sig_lgv=None,
+    sig_lgv_ref=None,
+    sig_lgv_slope=None,
     cap=None,
     mr_cut=None,
     zmin=None,
@@ -71,8 +72,10 @@ def make_paths(
         Photometric region: 'N' or 'S'.
     obs_seed : int, optional
         Observer position seed (0 = box centre).
-    sig_lgv : float, optional
-        log10(Vpeak) scatter in dex.
+    sig_lgv_ref : float, optional
+        log10(Vpeak) scatter at the pivot log10(Vpeak) = DEFAULT_LGV_PIVOT.
+    sig_lgv_slope : float, optional
+        Gradient of scatter with log10(Vpeak).
     cap : str, optional
         Galactic cap: 'NGC' or 'SGC'.
     mr_cut : float, optional
@@ -110,11 +113,11 @@ def make_paths(
     Examples
     --------
     # Paths needed to make a North checkpoint:
-    paths = make_paths(reg='N', obs_seed=0, sig_lgv=0.10)
+    paths = make_paths(reg='N', obs_seed=0, sig_lgv_ref=0.14, sig_lgv_slope=0.24)
     print(paths['subhalo_checkpoint'])
 
     # Paths needed to measure clustering:
-    paths = make_paths(obs_seed=0, sig_lgv=0.10, cap='NGC',
+    paths = make_paths(obs_seed=0, sig_lgv_ref=0.14, sig_lgv_slope=0.24, cap='NGC',
                        mr_cut=-21.0, zmin=0.1, zmax=0.4)
     print(paths['clustering'])
     """
@@ -140,35 +143,37 @@ def make_paths(
     paths["formock_ran_SGC"] = DATA_DIR / RANCAT_FORMOCK_SGC_TEMPLATE.format(date=d)
 
     # --- Uchuu checkpoint ---
-    if reg is not None and obs_seed is not None and sig_lgv is not None:
+    if reg is not None and obs_seed is not None and sig_lgv_ref is not None:
         paths["subhalo_checkpoint"] = DATA_DIR / SUBHALO_FITS_TEMPLATE.format(
             reg=reg,
             min_vpeak=mvp,
             obs_seed=obs_seed,
-            sig_lgv=sig_lgv,
+            sig_lgv_ref=sig_lgv_ref,
+            sig_lgv_slope=sig_lgv_slope,
             n_neigh_vpeak=nnvp,
         )
 
     # --- mock catalogues ---
-    if reg is not None and obs_seed is not None and sig_lgv is not None:
+    if reg is not None and obs_seed is not None and sig_lgv_ref is not None:
         paths[f"mock_{reg}"] = DATA_DIR / MOCK_TEMPLATE.format(
-            reg=reg, obs_seed=obs_seed, sig_lgv=sig_lgv
+            reg=reg, obs_seed=obs_seed, sig_lgv_ref=sig_lgv_ref, sig_lgv_slope=sig_lgv_slope
         )
-    if obs_seed is not None and sig_lgv is not None:
+    if obs_seed is not None and sig_lgv_ref is not None:
         paths["mock_NGC"] = DATA_DIR / MOCK_NGC_TEMPLATE.format(
-            obs_seed=obs_seed, sig_lgv=sig_lgv
+            obs_seed=obs_seed, sig_lgv_ref=sig_lgv_ref, sig_lgv_slope=sig_lgv_slope
         )
         paths["mock_SGC"] = DATA_DIR / MOCK_SGC_TEMPLATE.format(
-            obs_seed=obs_seed, sig_lgv=sig_lgv
+            obs_seed=obs_seed, sig_lgv_ref=sig_lgv_ref, sig_lgv_slope=sig_lgv_slope
         )
 
     # --- clustering output ---
-    if (cap is not None and obs_seed is not None and sig_lgv is not None
+    if (cap is not None and obs_seed is not None and sig_lgv_ref is not None
             and mr_cut is not None and zmin is not None and zmax is not None):
         paths["clustering"] = DATA_DIR / CLUSTERING_TEMPLATE.format(
             cap=cap,
             obs_seed=obs_seed,
-            sig_lgv=sig_lgv,
+            sig_lgv_ref=sig_lgv_ref,
+            sig_lgv_slope=sig_lgv_slope,
             mr_cut=mr_cut,
             zmin=zmin,
             zmax=zmax,

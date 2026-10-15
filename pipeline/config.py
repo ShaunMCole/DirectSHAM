@@ -190,16 +190,16 @@ RANCAT_FORMOCK_SGC_TEMPLATE = "rancat{date}_formock_SGC.fits"
 # Uchuu checkpoint file (expensive step; keyed by scatter and observer seed).
 SUBHALO_FITS_TEMPLATE = (
     "subhalos_{reg}_{min_vpeak:.1f}_seed{obs_seed:03d}"
-    "_sig_lgv{sig_lgv:.2f}_N_neigh_vpeak{n_neigh_vpeak:04d}.fits"
+    "_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}_N_neigh_vpeak{n_neigh_vpeak:04d}.fits"
 )
 
 # Mock galaxy catalogue.
-MOCK_TEMPLATE     = "mock_{reg}_seed{obs_seed:03d}_sig_lgv{sig_lgv:.2f}.fits"
-MOCK_NGC_TEMPLATE = "mock_NGC_seed{obs_seed:03d}_sig_lgv{sig_lgv:.2f}.fits"
-MOCK_SGC_TEMPLATE = "mock_SGC_seed{obs_seed:03d}_sig_lgv{sig_lgv:.2f}.fits"
+MOCK_TEMPLATE     = "mock_{reg}_seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}.fits"
+MOCK_NGC_TEMPLATE = "mock_NGC_seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}.fits"
+MOCK_SGC_TEMPLATE = "mock_SGC_seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}.fits"
 
 # Clustering output (produced by measure_clustering.py).
 CLUSTERING_TEMPLATE = (
-    "xi_{cap}_seed{obs_seed:03d}_sig_lgv{sig_lgv:.2f}"
+    "xi_{cap}_seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}"
     "_Mr{mr_cut:.1f}_z{zmin:.2f}-{zmax:.2f}.npy"
 )

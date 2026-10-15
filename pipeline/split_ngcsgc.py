@@ -7,17 +7,16 @@ into a single command-line tool.  It can split any combination of:
   --mocks      : combine mock_N + mock_S, split into mock_NGC + mock_SGC
   --formock    : combine formock_N + formock_S randoms, split into NGC + SGC
   --fordata    : split the combined fordata random catalogue into NGC + SGC
-  --data       : split the BGS data catalogue into NGC + SGC
 
-All four are run by default if no flags are given.
+All three are run by default if no flags are given.
 
 Usage examples
 --------------
 # Run all three splits (typical use):
-python split_ngcsgc.py --obs_seed 0 --sig_lgv 0.10
+python split_ngcsgc.py --obs_seed 0
 
 # Run only the mock split:
-python split_ngcsgc.py --obs_seed 0 --sig_lgv 0.10 --mocks
+python split_ngcsgc.py --obs_seed 0 --mocks
 
 # Run only the fordata random split (no mock parameters needed):
 python split_ngcsgc.py --fordata
@@ -38,7 +37,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from config import DEFAULT_OBS_SEED, DEFAULT_SIG_LGV
+from config import DEFAULT_OBS_SEED, DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE
 from pipeline_utils import make_paths, write_fits_meta, check_fits_meta, setup_logging
 
 warnings.filterwarnings("ignore", category=VerifyWarning)
@@ -289,8 +288,12 @@ def parse_args():
         help=f"Observer position seed (default: {DEFAULT_OBS_SEED})",
     )
     p.add_argument(
-        "--sig_lgv", type=float, default=DEFAULT_SIG_LGV,
-        help=f"log10(Vpeak) scatter in dex (default: {DEFAULT_SIG_LGV})",
+        "--sig_lgv_ref", type=float, default=DEFAULT_SIG_LGV_REF,
+        help=f"log10(Vpeak) scatter at pivot Vpeak (default: {DEFAULT_SIG_LGV_REF})",
+    )
+    p.add_argument(
+        "--sig_lgv_slope", type=float, default=DEFAULT_SIG_LGV_SLOPE,
+        help=f"Gradient of scatter with log10(Vpeak) (default: {DEFAULT_SIG_LGV_SLOPE})",
     )
     p.add_argument(
         "--mocks", action="store_true",
@@ -325,12 +328,14 @@ def main():
         paths.update(make_paths(
             reg=reg,
             obs_seed=args.obs_seed,
-            sig_lgv=args.sig_lgv,
+            sig_lgv_ref=args.sig_lgv_ref,
+            sig_lgv_slope=args.sig_lgv_slope,
         ))
     # Add the combined paths (no reg argument).
     paths.update(make_paths(
         obs_seed=args.obs_seed,
-        sig_lgv=args.sig_lgv,
+        sig_lgv_ref=args.sig_lgv_ref,
+        sig_lgv_slope=args.sig_lgv_slope,
     ))
 
     if args.mocks or run_all:

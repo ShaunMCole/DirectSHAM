@@ -17,17 +17,17 @@ Plot groups
 Usage examples
 --------------
 # Quick photometric check after a new mock:
-python inspect_mocks.py --reg N --obs_seed 0 --sig_lgv 0.04 --photometric
+python inspect_mocks.py --reg N --obs_seed 0 --photometric
 
 # Full diagnostic suite:
-python inspect_mocks.py --reg N --obs_seed 0 --sig_lgv 0.04 \\
+python inspect_mocks.py --reg N --obs_seed 0 \\
     --sky --redshift --photometric --halo
 
 # Paper-quality dN/dz with jackknife errors:
-python inspect_mocks.py --reg N --obs_seed 0 --sig_lgv 0.04 --jackknife
+python inspect_mocks.py --reg N --obs_seed 0 --jackknife
 
 # Display plots interactively as well as saving:
-python inspect_mocks.py --reg N --obs_seed 0 --sig_lgv 0.04 --redshift --show
+python inspect_mocks.py --reg N --obs_seed 0 --redshift --show
 """
 
 import argparse
@@ -44,7 +44,7 @@ import matplotlib.patches as mpatches
 
 # Pipeline modules
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import DATA_DIR, DEFAULT_OBS_SEED, DEFAULT_SIG_LGV
+from config import DATA_DIR, DEFAULT_OBS_SEED, DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE
 from pipeline_utils import make_paths, setup_logging
 
 
@@ -61,8 +61,10 @@ def parse_args():
                    help='Photometric region to inspect.')
     p.add_argument('--obs_seed', type=int, default=DEFAULT_OBS_SEED,
                    help=f'Observer position seed (default: {DEFAULT_OBS_SEED})')
-    p.add_argument('--sig_lgv', type=float, default=DEFAULT_SIG_LGV,
-                   help=f'Vpeak scatter in dex (default: {DEFAULT_SIG_LGV})')
+    p.add_argument('--sig_lgv_ref', type=float, default=DEFAULT_SIG_LGV_REF,
+                   help=f'Vpeak scatter at pivot Vpeak (default: {DEFAULT_SIG_LGV_REF})')
+    p.add_argument('--sig_lgv_slope', type=float, default=DEFAULT_SIG_LGV_SLOPE,
+                   help=f'Gradient of scatter with log10(Vpeak) (default: {DEFAULT_SIG_LGV_SLOPE})')
     p.add_argument('--absmag_lim', type=float, default=-8.0,
                    help='Faint absolute magnitude limit applied to all catalogues '
                         'before plotting (default: -8.0, i.e. keep everything)')
@@ -77,7 +79,7 @@ def parse_args():
                    help='Display plots interactively as well as saving to disk')
     p.add_argument('--outdir', type=str, default=None,
                    help='Output directory for figures. Defaults to '
-                        'DATA_DIR/diagnostics/seed{obs_seed}_sig_lgv{sig_lgv}_{date}/')
+                        'DATA_DIR/diagnostics/seed{obs_seed}_sig_lgv{ref}_{slope}_{date}/')
     return p.parse_args()
 
 
@@ -564,12 +566,13 @@ def main():
     else:
         tag    = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         outdir = (DATA_DIR / "diagnostics" /
-                  f"{args.reg}_seed{args.obs_seed:03d}_sig_lgv{args.sig_lgv:.2f}_{tag}")
+                  f"{args.reg}_seed{args.obs_seed:03d}_sig_lgv{args.sig_lgv_ref:.2f}_{args.sig_lgv_slope:.2f}_{tag}")
     outdir.mkdir(parents=True, exist_ok=True)
     log.info(f"Output directory: {outdir}")
 
     # Build paths.
-    paths = make_paths(reg=args.reg, obs_seed=args.obs_seed, sig_lgv=args.sig_lgv)
+    paths = make_paths(reg=args.reg, obs_seed=args.obs_seed,
+                       sig_lgv_ref=args.sig_lgv_ref, sig_lgv_slope=args.sig_lgv_slope)
 
     # Load catalogues.
     import catalogue_analysis as ca
