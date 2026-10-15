@@ -7,9 +7,13 @@ This is the expensive step: it requires an exclusive CPU node at NERSC
 (~128 GB RAM) and takes ~30 minutes.  Everything downstream (make_mock.py)
 can run on a login node using the checkpoint file.
 
-The checkpoint file is keyed by reg, obs_seed, sig_lgv and snapshot_index,
-so different scatter values each produce a distinct file and can be run in
-parallel as separate SLURM jobs.
+The checkpoint file is keyed by reg, obs_seed, sig_lgv_ref, sig_lgv_slope
+and snapshot_index, so different scatter parametrisations each produce a
+distinct file and can be run in parallel as separate SLURM jobs.
+
+The Vpeak scatter is Vpeak-dependent:
+    sig_lgv(Vpeak) = sig_lgv_ref + sig_lgv_slope * (log10(Vpeak) - lgv_pivot)
+where lgv_pivot = DEFAULT_LGV_PIVOT (≈ 2.6, corresponding to Mr ≈ -21).
 
 Usage examples
 --------------
@@ -22,15 +26,15 @@ python make_checkpoint.py --reg N
 # South only:
 python make_checkpoint.py --reg S
 
-# Both regions, sig_lgv=0.15, non-default seed:
-python make_checkpoint.py --reg NS --sig_lgv 0.15 --obs_seed 1
+# Both regions, non-default scatter parametrisation, non-default seed:
+python make_checkpoint.py --reg NS --sig_lgv_ref 0.16 --sig_lgv_slope 0.30 --obs_seed 1
 
 SLURM example
 -------------
 salloc --nodes=1 --qos=interactive --constraint=cpu \\
        --account=desi --mem=128GB --time=02:00:00
 source /global/common/software/desi/users/adematti/cosmodesi_environment.sh main
-python make_checkpoint.py --reg NS --sig_lgv 0.10
+python make_checkpoint.py --reg NS
 """
 
 # --- multiprocessing start method must be set before any other imports ---
@@ -54,7 +58,9 @@ from desimodel.footprint import is_point_in_desi
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import (
     DEFAULT_OBS_SEED,
-    DEFAULT_SIG_LGV,
+    DEFAULT_SIG_LGV_REF,
+    DEFAULT_SIG_LGV_SLOPE,
+    DEFAULT_LGV_PIVOT,
     MIN_VPEAK,
     N_NEIGH_VPEAK,
     LBOX,
@@ -96,10 +102,18 @@ def parse_args():
         ),
     )
     p.add_argument(
-        "--sig_lgv", type=float, default=DEFAULT_SIG_LGV,
+        "--sig_lgv_ref", type=float, default=DEFAULT_SIG_LGV_REF,
         help=(
-            f"Gaussian scatter in log10(Vpeak) in dex applied before "
-            f"ranking subhalos. 0.0 means no scatter. (default: {DEFAULT_SIG_LGV})"
+            f"Gaussian scatter in log10(Vpeak) [dex] at the pivot "
+            f"log10(Vpeak) = lgv_pivot. (default: {DEFAULT_SIG_LGV_REF})"
+        ),
+    )
+    p.add_argument(
+        "--sig_lgv_slope", type=float, default=DEFAULT_SIG_LGV_SLOPE,
+        help=(
+            f"Gradient of log10(Vpeak) scatter with log10(Vpeak). "
+            f"Positive means brighter (higher Vpeak) haloes get more scatter. "
+            f"(default: {DEFAULT_SIG_LGV_SLOPE})"
         ),
     )
     p.add_argument(
@@ -154,30 +168,34 @@ def observer_position(obs_seed, lbox, log):
 def add_sky_coords(subhalos, obs_seed, log):
     import MockCode as mc
 
-    t0 = time.time()
-    phi, theta, psi = mc.random_euler_angles(seed=obs_seed)
-    log.info(f"Euler angles: phi={phi:.4f}  theta={theta:.4f}  psi={psi:.4f}")
-    R = mc.euler_rotation_matrix(phi, theta, psi)
-
-    vxr = R[0,0]*subhalos['vx'] + R[0,1]*subhalos['vy'] + R[0,2]*subhalos['vz']
-    vyr = R[1,0]*subhalos['vx'] + R[1,1]*subhalos['vy'] + R[1,2]*subhalos['vz']
-    vzr = R[2,0]*subhalos['vx'] + R[2,1]*subhalos['vy'] + R[2,2]*subhalos['vz']
-    subhalos['vx'] = vxr;  subhalos['vy'] = vyr;  subhalos['vz'] = vzr
-    del vxr, vyr, vzr
-
-    xr = R[0,0]*subhalos['x'] + R[0,1]*subhalos['y'] + R[0,2]*subhalos['z']
-    yr = R[1,0]*subhalos['x'] + R[1,1]*subhalos['y'] + R[1,2]*subhalos['z']
-    zr = R[2,0]*subhalos['x'] + R[2,1]*subhalos['y'] + R[2,2]*subhalos['z']
-    subhalos['x'] = xr;  subhalos['y'] = yr;  subhalos['z'] = zr
-    del xr, yr, zr
-    log.info(f"Rotation done in {time.time()-t0:.1f}s")
+    if (obs_seed == 0):
+        log.info(f"Observer 0:No rotation")
+    else:    
+        t0 = time.time()
+        phi, theta, psi = mc.random_euler_angles(seed=obs_seed)
+        log.info(f"Euler angles: phi={phi:.4f}  theta={theta:.4f}  psi={psi:.4f}")
+        R = mc.euler_rotation_matrix(phi, theta, psi)
+    
+        vxr = R[0,0]*subhalos['vx'] + R[0,1]*subhalos['vy'] + R[0,2]*subhalos['vz']
+        vyr = R[1,0]*subhalos['vx'] + R[1,1]*subhalos['vy'] + R[1,2]*subhalos['vz']
+        vzr = R[2,0]*subhalos['vx'] + R[2,1]*subhalos['vy'] + R[2,2]*subhalos['vz']
+        subhalos['vx'] = vxr;  subhalos['vy'] = vyr;  subhalos['vz'] = vzr
+        del vxr, vyr, vzr
+    
+        xr = R[0,0]*subhalos['x'] + R[0,1]*subhalos['y'] + R[0,2]*subhalos['z']
+        yr = R[1,0]*subhalos['x'] + R[1,1]*subhalos['y'] + R[1,2]*subhalos['z']
+        zr = R[2,0]*subhalos['x'] + R[2,1]*subhalos['y'] + R[2,2]*subhalos['z']
+        subhalos['x'] = xr;  subhalos['y'] = yr;  subhalos['z'] = zr
+        del xr, yr, zr
+        log.info(f"Rotation done in {time.time()-t0:.1f}s")
 
     t0 = time.time()
     dist = np.sqrt(subhalos['x']**2 + subhalos['y']**2 + subhalos['z']**2)
     subhalos['dist'] = dist
     subhalos['DEC']  = np.degrees(np.arcsin(subhalos['z'] / dist))
     subhalos['RA']   = np.degrees(np.arctan2(subhalos['y'], subhalos['x'])) % 360
-
+    log.info(f"RA, DEC and dist computed")
+    
     c_light = 299792.458
     vr_c = (
         subhalos['x']*subhalos['vx'] +
@@ -193,7 +211,8 @@ def add_sky_coords(subhalos, obs_seed, log):
     subhalos.remove_column('Rvir')
     subhalos.remove_column('rs')
     gc.collect()
-
+    log.info(f"Radial velocity vr_c and conc computed.")
+    
     z_grid  = np.linspace(0.0, 1.0, 10000)
     Dc_grid = cosmo_uchuu.comoving_distance(z_grid).value
     z_of_Dc = interp1d(Dc_grid, z_grid, bounds_error=False, fill_value="extrapolate")
@@ -202,7 +221,7 @@ def add_sky_coords(subhalos, obs_seed, log):
     subhalos['Zobs'] = (1.0 + subhalos['Zu']) * (1.0 + vr_c) - 1.0
     del z_grid, Dc_grid, z_of_Dc, vr_c, dist
 
-    log.info(f"RA/DEC/redshift computation done in {time.time()-t0:.1f}s")
+    log.info(f"RA/DEC/dist/vr_c/conc/redshift/obs redshift computation done in {time.time()-t0:.1f}s")
     return subhalos
 
 
@@ -246,19 +265,21 @@ def write_checkpoint(subhalos_reg, reg, args, redshift, out_path, log):
         subhalos_reg.rename_column('id', 'ID')
 
     write_fits_meta(subhalos_reg.meta, {
-        "STAGE":      "make_checkpoint",
-        "REG":        reg,
-        "OBS_SEED":   args.obs_seed,
-        "SIG_LGV":    args.sig_lgv,
-        "MIN_VPEAK":  args.min_vpeak,
-        "NNVPEAK":    args.n_neigh_vpeak,
-        "SNAPIDX":    args.snapshot_index,
-        "SNAPZ":      redshift,
-        "LBOX":       LBOX,
-        "FRAC_BOX":   FRAC_BOX,
-        "RAMIN":      NORTH_RA_MIN,
-        "RAMAX":      NORTH_RA_MAX,
-        "DECMIN":     NORTH_DEC_MIN,
+        "STAGE":        "make_checkpoint",
+        "REG":          reg,
+        "OBS_SEED":     args.obs_seed,
+        "SIGLGVREF":    args.sig_lgv_ref,
+        "SIGLGVSLP":    args.sig_lgv_slope,
+        "LGVPIVOT":     DEFAULT_LGV_PIVOT,
+        "MIN_VPEAK":    args.min_vpeak,
+        "NNVPEAK":      args.n_neigh_vpeak,
+        "SNAPIDX":      args.snapshot_index,
+        "SNAPZ":        redshift,
+        "LBOX":         LBOX,
+        "FRAC_BOX":     FRAC_BOX,
+        "RAMIN":        NORTH_RA_MIN,
+        "RAMAX":        NORTH_RA_MAX,
+        "DECMIN":       NORTH_DEC_MIN,
     })
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -279,7 +300,9 @@ def main():
 
     log = setup_logging("make_checkpoint")
     log.info(
-        f"reg={args.reg}  obs_seed={args.obs_seed}  sig_lgv={args.sig_lgv}  "
+        f"reg={args.reg}  obs_seed={args.obs_seed}  "
+        f"sig_lgv_ref={args.sig_lgv_ref}  sig_lgv_slope={args.sig_lgv_slope}  "
+        f"lgv_pivot={DEFAULT_LGV_PIVOT}  "
         f"min_vpeak={args.min_vpeak}  n_neigh_vpeak={args.n_neigh_vpeak}  "
         f"snapshot_index={args.snapshot_index}"
     )
@@ -300,7 +323,8 @@ def main():
         paths = make_paths(
             reg=reg,
             obs_seed=args.obs_seed,
-            sig_lgv=args.sig_lgv,
+            sig_lgv_ref=args.sig_lgv_ref,
+            sig_lgv_slope=args.sig_lgv_slope,
             min_vpeak=args.min_vpeak,
             n_neigh_vpeak=args.n_neigh_vpeak,
         )
@@ -340,7 +364,8 @@ def main():
     subhalos = add_sky_coords(subhalos, args.obs_seed, log)
 
     # -------------------------------------------------------------------------
-    # 3. Sort by Vpeak, compute FracZpeak, apply scatter, re-sort, trim
+    # 3. Sort by Vpeak, compute FracZpeak, apply Vpeak-dependent scatter,
+    #    re-sort, trim
     # -------------------------------------------------------------------------
     t0 = time.time()
     subhalos = mc.make_all_columns_contiguous(subhalos)
@@ -349,7 +374,9 @@ def main():
     subhalos = mc.pre_sort_subhalos(
         subhalos,
         N_neigh=args.n_neigh_vpeak,
-        sig_lgv=args.sig_lgv,
+        sig_lgv_ref=args.sig_lgv_ref,
+        sig_lgv_slope=args.sig_lgv_slope,
+        lgv_pivot=DEFAULT_LGV_PIVOT,
         plot=args.plot,
     )
 

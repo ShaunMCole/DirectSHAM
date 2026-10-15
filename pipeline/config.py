@@ -155,7 +155,12 @@ NMULT_DOWNSAMPLE_SEED = 12345
 # Mock catalogue parameters (defaults; overridden on the command line)
 # =============================================================================
 
-DEFAULT_SIG_LGV  = 0.04   # log10(Vpeak) scatter [dex]
+# Vpeak scatter parametrisation: sig_lgv = sig_lgv_ref + sig_lgv_slope * (log10(Vpeak) - 2.6)
+# sig_lgv_ref: scatter at log10(Vpeak/km/s) = 2.6  (~Mr = -21)
+# sig_lgv_slope: gradient with log10(Vpeak) (positive = more scatter for brighter/more massive haloes)
+DEFAULT_SIG_LGV_REF   = 0.14
+DEFAULT_SIG_LGV_SLOPE = 0.24
+DEFAULT_LGV_PIVOT     = 2.6   # log10(Vpeak/[km/s]) pivot point
 DEFAULT_OBS_SEED = 0       # Observer position seed (0 = box centre)
 MIN_VPEAK        = 70.0    # Discard subhalos below this Vpeak [km/s]
 N_NEIGH_VPEAK    = 1000    # Neighbours used to compute FracZpeak
