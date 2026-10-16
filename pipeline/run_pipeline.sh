@@ -19,7 +19,7 @@ cd ~/DirectSHAM/pipeline
 
 OBS_SEED=0
 SIG_LGV_REF=0.14
-SIG_LGV_SLOPE=0.24
+SIG_LGV_SLOPE=0.30
 
 # 5 samples: mr_cut zmin zmax
 SAMPLES=(
