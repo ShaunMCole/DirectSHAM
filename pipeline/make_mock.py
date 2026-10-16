@@ -324,6 +324,7 @@ def build_mock_catalogue(subhalos, randoms, subhalo_id, galaxy_id, args, log):
     rmag     = np.full(nsub, np.nan, dtype=np.float32)
     gmag     = np.full(nsub, np.nan, dtype=np.float32)
     Zr       = np.full(nsub, np.nan, dtype=np.float32)
+    RestGMR  = np.full(nsub, np.nan, dtype=np.float32)
     TargetID = np.full(nsub, -1,     dtype=randoms['TARGETID'].dtype)
 
     # Copy intrinsic properties from matched random catalogue rows.
@@ -331,6 +332,7 @@ def build_mock_catalogue(subhalos, randoms, subhalo_id, galaxy_id, args, log):
     Mrobs[sub_rows]    = randoms['ABSMAG_R'][gal_rows]
     Mg[sub_rows]       = randoms['ABSMAG_GP1'][gal_rows]
     Zr[sub_rows]       = randoms['Z'][gal_rows]
+    RestGMR[sub_rows]  = randoms['REST_GMR_0P1'][gal_rows]
     TargetID[sub_rows] = randoms['TARGETID'][gal_rows]
 
     # Recompute apparent magnitudes at the subhalo redshift.
@@ -339,20 +341,19 @@ def build_mock_catalogue(subhalos, randoms, subhalo_id, galaxy_id, args, log):
     kcorr_g  = Desi_KCorrection_for(args.reg, 'G')
 
     z_gal      = randoms['Z'][gal_rows]
-    rest_GMR   = randoms['ABSMAG_GP1'][gal_rows] - randoms['ABSMAG_RP1'][gal_rows]
     DMOD       = 25.0 + 5.0 * np.log10(cosmo.luminosity_distance(z_gal).value)
 
     rmag[sub_rows] = (
         randoms['ABSMAG_RP1'][gal_rows]
         + DMOD
         - Sel['Qr'] * (z_gal - 0.1)
-        + kcorr_r.k(z_gal, rest_GMR)
+        + kcorr_r.k(z_gal, RestGMR)
     )
     gmag[sub_rows] = (
         randoms['ABSMAG_GP1'][gal_rows]
         + DMOD
         - Sel['Qg'] * (z_gal - 0.1)
-        + kcorr_g.k(z_gal, rest_GMR)
+        + kcorr_g.k(z_gal, RestGMR)
     )
 
     # Attach arrays to the subhalo table.
@@ -362,9 +363,10 @@ def build_mock_catalogue(subhalos, randoms, subhalo_id, galaxy_id, args, log):
     subhalos['rmag']       = rmag
     subhalos['gmag']       = gmag
     subhalos['Zr']         = Zr
+    subhalos['REST_GMR_0P1'] = RestGMR
     subhalos['TARGETID']   = TargetID
 
-    del DMOD, rest_GMR, Mr, Mrobs, Mg, rmag, gmag, Zr, TargetID, z_gal
+    del DMOD, RestGMR, Mr, Mrobs, Mg, rmag, gmag, Zr, TargetID, z_gal
     gc.collect()
 
     # Keep only matched rows (those with a finite rmag).
