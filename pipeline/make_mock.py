@@ -257,7 +257,7 @@ def run_sham(subhalos, randoms, fsky, nmult_formock, deltaz, args, log):
 
     diagnostics_path = str(
         DATA_DIR / f"diagnostics_{args.reg}_seed{args.obs_seed:03d}"
-                   f"_sig_lgv{args.sig_lgv:.2f}.fits"
+                   f"_sig_lgv{args.sig_lgv_ref:.2f}_{args.sig_lgv_slope:.2f}.fits"
     )
 
     log.info(
