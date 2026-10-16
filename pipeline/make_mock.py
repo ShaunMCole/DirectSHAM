@@ -347,13 +347,13 @@ def build_mock_catalogue(subhalos, randoms, subhalo_id, galaxy_id, args, log):
         randoms['ABSMAG_RP1'][gal_rows]
         + DMOD
         - Sel['Qr'] * (z_gal - 0.1)
-        + kcorr_r.k(z_gal, RestGMR)
+        + kcorr_r.k(z_gal, RestGMR[gal_rows])
     )
     gmag[sub_rows] = (
         randoms['ABSMAG_GP1'][gal_rows]
         + DMOD
         - Sel['Qg'] * (z_gal - 0.1)
-        + kcorr_g.k(z_gal, RestGMR)
+        + kcorr_g.k(z_gal, RestGMR[gal_rows])
     )
 
     # Attach arrays to the subhalo table.
