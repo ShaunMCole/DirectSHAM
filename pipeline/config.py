@@ -51,11 +51,13 @@ DATA_DIR = Path("/global/cfs/cdirs/desi/users/smcole/DirectSHAM")
 
 # Date/version tags used throughout the pipeline.  Changing these here
 # updates all downstream filenames automatically.
-DATA_DATE   = "6thOct"
-LSS_VERSION = "v2.1"
+DATA_DATE     = "6thOct"
+LSS_VERSION   = "v2.1"
+DATA_DATE_DIR = DATA_DIR / DATA_DATE   # root for all date-specific files
 
 # Processed BGS catalogue produced by Augment_BGS_cat.ipynb upstream.
-BGS_CAT = DATA_DIR / f"BGS_BRIGHT_{DATA_DATE}.fits"
+# Date is kept in the filename so the file is self-describing when shared.
+BGS_CAT = DATA_DATE_DIR / f"BGS_BRIGHT_{DATA_DATE}.fits"
 
 # Official DESI parent catalogues (read-only; not produced by this pipeline).
 DESI_LSS_BASE = Path(
@@ -178,28 +180,34 @@ KCORR_REF_GMR = 0.77
 # make_paths()), which uses the templates below.  Do not construct
 # filenames ad-hoc in other scripts.
 
-# fordata random catalogue (one per photometric region, then combined).
-RANCAT_FORDATA_TEMPLATE    = "rancat{date}_fordata_{reg}.fits"
-RANCAT_FORDATA_NS_TEMPLATE = "rancat{date}_fordata.fits"      # N+S combined
+# Model directory name — all files for one scatter realisation live here,
+# under DATA_DATE_DIR.
+# e.g. DATA_DATE_DIR / "seed000_sig_lgv0.18_0.30/"
+MODEL_DIR_TEMPLATE = "seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}"
 
-# formock random catalogue (one per photometric region, then split by cap).
-RANCAT_FORMOCK_TEMPLATE     = "rancat{date}_formock_{reg}.fits"
-RANCAT_FORMOCK_NGC_TEMPLATE = "rancat{date}_formock_NGC.fits"
-RANCAT_FORMOCK_SGC_TEMPLATE = "rancat{date}_formock_SGC.fits"
+# fordata random catalogue — shared across all models; date captured by
+# parent directory, so not repeated in filename.
+RANCAT_FORDATA_TEMPLATE    = "rancat_fordata_{reg}.fits"
+RANCAT_FORDATA_NS_TEMPLATE = "rancat_fordata.fits"        # N+S combined
 
-# Uchuu checkpoint file (expensive step; keyed by scatter and observer seed).
+# formock random catalogue — shared across all models.
+RANCAT_FORMOCK_TEMPLATE     = "rancat_formock_{reg}.fits"
+RANCAT_FORMOCK_NGC_TEMPLATE = "rancat_formock_NGC.fits"
+RANCAT_FORMOCK_SGC_TEMPLATE = "rancat_formock_SGC.fits"
+
+# Uchuu checkpoint file — lives inside the model directory.
+# obs_seed and sig_lgv are encoded in the model directory name, not here.
 SUBHALO_FITS_TEMPLATE = (
-    "subhalos_{reg}_{min_vpeak:.1f}_seed{obs_seed:03d}"
-    "_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}_N_neigh_vpeak{n_neigh_vpeak:04d}.fits"
+    "subhalos_{reg}_{min_vpeak:.1f}_N_neigh_vpeak{n_neigh_vpeak:04d}.fits"
 )
 
-# Mock galaxy catalogue.
-MOCK_TEMPLATE     = "mock_{reg}_seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}.fits"
-MOCK_NGC_TEMPLATE = "mock_NGC_seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}.fits"
-MOCK_SGC_TEMPLATE = "mock_SGC_seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}.fits"
+# Mock galaxy catalogue — lives inside the model directory.
+MOCK_TEMPLATE     = "mock_{reg}.fits"
+MOCK_NGC_TEMPLATE = "mock_NGC.fits"
+MOCK_SGC_TEMPLATE = "mock_SGC.fits"
 
-# Clustering output (produced by measure_clustering.py).
+# Clustering output — lives inside the model directory under clustering/.
+# cap, mr_cut and redshift range distinguish samples within the model dir.
 CLUSTERING_TEMPLATE = (
-    "xi_{cap}_seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}"
-    "_Mr{mr_cut:.1f}_z{zmin:.2f}-{zmax:.2f}.npy"
+    "xi_{cap}_Mr{mr_cut:.1f}_z{zmin:.2f}-{zmax:.2f}.npy"
 )

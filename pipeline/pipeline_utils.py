@@ -26,8 +26,10 @@ from pathlib import Path
 from config import (
     DATA_DIR,
     DATA_DATE,
+    DATA_DATE_DIR,
     MIN_VPEAK,
     N_NEIGH_VPEAK,
+    MODEL_DIR_TEMPLATE,
     RANCAT_FORDATA_TEMPLATE,
     RANCAT_FORDATA_NS_TEMPLATE,
     RANCAT_FORMOCK_TEMPLATE,
@@ -54,17 +56,19 @@ def make_paths(
     mr_cut=None,
     zmin=None,
     zmax=None,
-    date=None,
     min_vpeak=None,
     n_neigh_vpeak=None,
 ):
     """
     Construct all standard pipeline file paths for the given parameters.
 
+    All date-specific files live under DATA_DATE_DIR (= DATA_DIR / DATA_DATE).
+    All model-specific files live under a model subdirectory of DATA_DATE_DIR,
+    named seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}.
+
     Only the parameters relevant to the paths you need must be supplied;
     the rest can be left as None.  Passing an unneeded parameter does no
-    harm.  Attempting to access a path whose required parameters were not
-    supplied will raise a clear KeyError.
+    harm.
 
     Parameters
     ----------
@@ -73,38 +77,33 @@ def make_paths(
     obs_seed : int, optional
         Observer position seed (0 = box centre).
     sig_lgv_ref : float, optional
-        log10(Vpeak) scatter at the pivot log10(Vpeak) = DEFAULT_LGV_PIVOT.
+        Vpeak scatter at the pivot log10(Vpeak).
     sig_lgv_slope : float, optional
         Gradient of scatter with log10(Vpeak).
     cap : str, optional
         Galactic cap: 'NGC' or 'SGC'.
     mr_cut : float, optional
-        Absolute magnitude cut applied to the clustering sample (e.g. -21.0).
+        Absolute magnitude cut (e.g. -21.0).
     zmin : float, optional
         Minimum redshift of the clustering sample.
     zmax : float, optional
         Maximum redshift of the clustering sample.
-    date : str, optional
-        Date tag for catalogue filenames.  Defaults to DATA_DATE from config.
     min_vpeak : float, optional
-        Minimum Vpeak threshold used when making the checkpoint file.
-        Defaults to MIN_VPEAK from config.
+        Minimum Vpeak threshold. Defaults to MIN_VPEAK from config.
     n_neigh_vpeak : int, optional
-        Number of Vpeak neighbours used when computing FracZpeak.
-        Defaults to N_NEIGH_VPEAK from config.
+        N_neigh_vpeak. Defaults to N_NEIGH_VPEAK from config.
 
     Returns
     -------
     dict
-        Dictionary mapping path name strings to pathlib.Path objects.
-        Keys are:
-
+        Keys:
+        model_dir             — model subdirectory (Path)
         fordata_ran_{reg}     — per-region fordata random catalogue
         fordata_ran           — combined N+S fordata random catalogue
         formock_ran_{reg}     — per-region formock random catalogue
         formock_ran_NGC       — NGC formock random catalogue
         formock_ran_SGC       — SGC formock random catalogue
-        subhalo_checkpoint    — Uchuu checkpoint file (expensive step)
+        subhalo_checkpoint    — Uchuu checkpoint file
         mock_{reg}            — per-region mock galaxy catalogue
         mock_NGC              — NGC mock galaxy catalogue
         mock_SGC              — SGC mock galaxy catalogue
@@ -113,71 +112,69 @@ def make_paths(
     Examples
     --------
     # Paths needed to make a North checkpoint:
-    paths = make_paths(reg='N', obs_seed=0, sig_lgv_ref=0.14, sig_lgv_slope=0.24)
+    paths = make_paths(reg='N', obs_seed=0, sig_lgv_ref=0.18, sig_lgv_slope=0.30)
     print(paths['subhalo_checkpoint'])
 
     # Paths needed to measure clustering:
-    paths = make_paths(obs_seed=0, sig_lgv_ref=0.14, sig_lgv_slope=0.24, cap='NGC',
-                       mr_cut=-21.0, zmin=0.1, zmax=0.4)
+    paths = make_paths(obs_seed=0, sig_lgv_ref=0.18, sig_lgv_slope=0.30,
+                       cap='NGC', mr_cut=-21.0, zmin=0.02, zmax=0.42)
     print(paths['clustering'])
     """
-    d      = date         if date         is not None else DATA_DATE
-    mvp    = min_vpeak    if min_vpeak    is not None else MIN_VPEAK
-    nnvp   = n_neigh_vpeak if n_neigh_vpeak is not None else N_NEIGH_VPEAK
+    mvp  = min_vpeak    if min_vpeak    is not None else MIN_VPEAK
+    nnvp = n_neigh_vpeak if n_neigh_vpeak is not None else N_NEIGH_VPEAK
 
     paths = {}
 
-    # --- fordata randoms ---
+    # --- fordata randoms (shared; live in DATA_DATE_DIR) ---
     if reg is not None:
-        paths[f"fordata_ran_{reg}"] = DATA_DIR / RANCAT_FORDATA_TEMPLATE.format(
-            date=d, reg=reg
+        paths[f"fordata_ran_{reg}"] = DATA_DATE_DIR / RANCAT_FORDATA_TEMPLATE.format(
+            reg=reg
         )
-    paths["fordata_ran"] = DATA_DIR / RANCAT_FORDATA_NS_TEMPLATE.format(date=d)
+    paths["fordata_ran"] = DATA_DATE_DIR / RANCAT_FORDATA_NS_TEMPLATE
 
-    # --- formock randoms ---
+    # --- formock randoms (shared; live in DATA_DATE_DIR) ---
     if reg is not None:
-        paths[f"formock_ran_{reg}"] = DATA_DIR / RANCAT_FORMOCK_TEMPLATE.format(
-            date=d, reg=reg
+        paths[f"formock_ran_{reg}"] = DATA_DATE_DIR / RANCAT_FORMOCK_TEMPLATE.format(
+            reg=reg
         )
-    paths["formock_ran_NGC"] = DATA_DIR / RANCAT_FORMOCK_NGC_TEMPLATE.format(date=d)
-    paths["formock_ran_SGC"] = DATA_DIR / RANCAT_FORMOCK_SGC_TEMPLATE.format(date=d)
+    paths["formock_ran_NGC"] = DATA_DATE_DIR / RANCAT_FORMOCK_NGC_TEMPLATE
+    paths["formock_ran_SGC"] = DATA_DATE_DIR / RANCAT_FORMOCK_SGC_TEMPLATE
 
-    # --- Uchuu checkpoint ---
-    if reg is not None and obs_seed is not None and sig_lgv_ref is not None:
-        paths["subhalo_checkpoint"] = DATA_DIR / SUBHALO_FITS_TEMPLATE.format(
-            reg=reg,
-            min_vpeak=mvp,
-            obs_seed=obs_seed,
-            sig_lgv_ref=sig_lgv_ref,
-            sig_lgv_slope=sig_lgv_slope,
-            n_neigh_vpeak=nnvp,
-        )
-
-    # --- mock catalogues ---
-    if reg is not None and obs_seed is not None and sig_lgv_ref is not None:
-        paths[f"mock_{reg}"] = DATA_DIR / MOCK_TEMPLATE.format(
-            reg=reg, obs_seed=obs_seed, sig_lgv_ref=sig_lgv_ref, sig_lgv_slope=sig_lgv_slope
-        )
+    # --- model directory ---
     if obs_seed is not None and sig_lgv_ref is not None:
-        paths["mock_NGC"] = DATA_DIR / MOCK_NGC_TEMPLATE.format(
-            obs_seed=obs_seed, sig_lgv_ref=sig_lgv_ref, sig_lgv_slope=sig_lgv_slope
-        )
-        paths["mock_SGC"] = DATA_DIR / MOCK_SGC_TEMPLATE.format(
-            obs_seed=obs_seed, sig_lgv_ref=sig_lgv_ref, sig_lgv_slope=sig_lgv_slope
-        )
-
-    # --- clustering output ---
-    if (cap is not None and obs_seed is not None and sig_lgv_ref is not None
-            and mr_cut is not None and zmin is not None and zmax is not None):
-        paths["clustering"] = DATA_DIR / CLUSTERING_TEMPLATE.format(
-            cap=cap,
+        model_dir = DATA_DATE_DIR / MODEL_DIR_TEMPLATE.format(
             obs_seed=obs_seed,
             sig_lgv_ref=sig_lgv_ref,
             sig_lgv_slope=sig_lgv_slope,
-            mr_cut=mr_cut,
-            zmin=zmin,
-            zmax=zmax,
         )
+        paths["model_dir"] = model_dir
+
+        # --- Uchuu checkpoint (inside model dir) ---
+        if reg is not None:
+            paths["subhalo_checkpoint"] = model_dir / SUBHALO_FITS_TEMPLATE.format(
+                reg=reg,
+                min_vpeak=mvp,
+                n_neigh_vpeak=nnvp,
+            )
+
+        # --- mock catalogues (inside model dir) ---
+        if reg is not None:
+            paths[f"mock_{reg}"] = model_dir / MOCK_TEMPLATE.format(reg=reg)
+        paths["mock_NGC"] = model_dir / MOCK_NGC_TEMPLATE
+        paths["mock_SGC"] = model_dir / MOCK_SGC_TEMPLATE
+
+        # --- clustering output (inside model dir under clustering/) ---
+        if (cap is not None and mr_cut is not None
+                and zmin is not None and zmax is not None):
+            paths["clustering"] = (
+                model_dir / "clustering"
+                / CLUSTERING_TEMPLATE.format(
+                    cap=cap,
+                    mr_cut=mr_cut,
+                    zmin=zmin,
+                    zmax=zmax,
+                )
+            )
 
     return paths
 

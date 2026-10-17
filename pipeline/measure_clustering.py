@@ -36,7 +36,7 @@ import fitsio
 
 # Pipeline modules
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import DATA_DIR, DATA_DATE
+from config import DATA_DIR, DATA_DATE, DATA_DATE_DIR
 from pipeline_utils import setup_logging
 
 
@@ -56,11 +56,10 @@ PARENT_DAT = LSS_CATS / "BGS_BRIGHT_full_HPmapcut.dat.fits"
 PARENT_RAN = LSS_CATS / "BGS_BRIGHT_0_full_HPmapcut.ran.fits"
 
 # Data and random catalogues split by galactic cap.
-_DATDIR  = DATA_DIR
-DAT_NGC  = _DATDIR / f"BGS_BRIGHT_{DATA_DATE}_NGC.fits"
-DAT_SGC  = _DATDIR / f"BGS_BRIGHT_{DATA_DATE}_SGC.fits"
-RAN_NGC  = _DATDIR / f"rancat{DATA_DATE}_fordata_NGC.fits"
-RAN_SGC  = _DATDIR / f"rancat{DATA_DATE}_fordata_SGC.fits"
+DAT_NGC  = DATA_DATE_DIR / f"BGS_BRIGHT_{DATA_DATE}_NGC.fits"
+DAT_SGC  = DATA_DATE_DIR / f"BGS_BRIGHT_{DATA_DATE}_SGC.fits"
+RAN_NGC  = DATA_DATE_DIR / "rancat_fordata_NGC.fits"
+RAN_SGC  = DATA_DATE_DIR / "rancat_fordata_SGC.fits"
 
 
 # =============================================================================
@@ -166,7 +165,7 @@ def main():
     if args.outdir:
         outdir = Path(args.outdir)
     else:
-        outdir = DATA_DIR / "clustering" / "data" / sample_tag
+        outdir = DATA_DATE_DIR / "clustering" / "data" / sample_tag
 
     basedir = outdir / "catalogues"
     basedir.mkdir(parents=True, exist_ok=True)

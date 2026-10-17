@@ -40,7 +40,7 @@ import fitsio
 
 # Pipeline modules
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import DATA_DIR, DEFAULT_OBS_SEED, DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE
+from config import DEFAULT_OBS_SEED, DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE
 from pipeline_utils import make_paths, setup_logging
 
 # LSS repo location
@@ -171,8 +171,7 @@ def main():
     if args.outdir:
         outdir = Path(args.outdir)
     else:
-        mock_tag = f"seed{args.obs_seed:03d}_sig_lgv{args.sig_lgv_ref:.2f}_{args.sig_lgv_slope:.2f}"
-        outdir   = DATA_DIR / "clustering" / "mocks" / mock_tag / sample_tag
+        outdir = paths["model_dir"] / "clustering" / sample_tag
 
     basedir = outdir / "catalogues"
     basedir.mkdir(parents=True, exist_ok=True)
