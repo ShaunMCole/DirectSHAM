@@ -431,6 +431,23 @@ def main():
                     dest_ran.unlink()
                 dest_ran.symlink_to(colour_ran.name)
 
+            # Symlink parent catalogues needed for angular upweighting
+            LSS_CATS = Path(
+                "/global/cfs/cdirs/desi/survey/catalogs/DA2/LSS"
+                "/loa-v1/LSScats/v2.1"
+            )
+            for src, name in [
+                (LSS_CATS / "BGS_BRIGHT_full_HPmapcut.dat.fits",
+                 "BGS_BRIGHT_full_HPmapcut.dat.fits"),
+                (LSS_CATS / "BGS_BRIGHT_0_full_HPmapcut.ran.fits",
+                 "BGS_BRIGHT_0_full_HPmapcut.ran.fits"),
+            ]:
+                dst = basedir / name
+                if dst.exists() or dst.is_symlink():
+                    dst.unlink()
+                dst.symlink_to(src)
+                log.info(f"  {dst.name} → {src}")
+
             run_xirunpc(
                 lss_script, basedir, args.regions,
                 args.zmin, args.zmax, outdir,
