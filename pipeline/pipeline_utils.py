@@ -29,6 +29,8 @@ from config import (
     DATA_DATE_DIR,
     MIN_VPEAK,
     N_NEIGH_VPEAK,
+    N_NEIGH_LUM,
+    NLUM_DIR_TEMPLATE,
     MODEL_DIR_TEMPLATE,
     RANCAT_FORDATA_TEMPLATE,
     RANCAT_FORDATA_NS_TEMPLATE,
@@ -58,6 +60,7 @@ def make_paths(
     zmax=None,
     min_vpeak=None,
     n_neigh_vpeak=None,
+    n_neigh_lum=None,
 ):
     """
     Construct all standard pipeline file paths for the given parameters.
@@ -120,8 +123,9 @@ def make_paths(
                        cap='NGC', mr_cut=-21.0, zmin=0.02, zmax=0.42)
     print(paths['clustering'])
     """
-    mvp  = min_vpeak    if min_vpeak    is not None else MIN_VPEAK
-    nnvp = n_neigh_vpeak if n_neigh_vpeak is not None else N_NEIGH_VPEAK
+    mvp   = min_vpeak    if min_vpeak    is not None else MIN_VPEAK
+    nnvp  = n_neigh_vpeak if n_neigh_vpeak is not None else N_NEIGH_VPEAK
+    nnlum = n_neigh_lum  if n_neigh_lum  is not None else N_NEIGH_LUM
 
     paths = {}
 
@@ -140,14 +144,16 @@ def make_paths(
     paths["formock_ran_NGC"] = DATA_DATE_DIR / RANCAT_FORMOCK_NGC_TEMPLATE
     paths["formock_ran_SGC"] = DATA_DATE_DIR / RANCAT_FORMOCK_SGC_TEMPLATE
 
-    # --- model directory ---
+    # --- N_neigh_lum and model directories ---
     if obs_seed is not None and sig_lgv_ref is not None:
-        model_dir = DATA_DATE_DIR / MODEL_DIR_TEMPLATE.format(
+        nlum_dir  = DATA_DATE_DIR / NLUM_DIR_TEMPLATE.format(n_neigh_lum=nnlum)
+        model_dir = nlum_dir / MODEL_DIR_TEMPLATE.format(
             obs_seed=obs_seed,
             sig_lgv_ref=sig_lgv_ref,
             sig_lgv_slope=sig_lgv_slope,
         )
-        paths["model_dir"] = model_dir
+        paths["nlum_dir"]   = nlum_dir
+        paths["model_dir"]  = model_dir
 
         # --- Uchuu checkpoint (inside model dir) ---
         if reg is not None:

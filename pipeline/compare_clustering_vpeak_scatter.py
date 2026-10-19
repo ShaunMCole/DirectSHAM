@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from pipeline_utils import setup_logging
+from pipeline_utils import setup_logging, make_paths
 from config import DATA_DATE_DIR, DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE
 
 # =============================================================================
@@ -117,17 +117,18 @@ def parse_args():
 # =============================================================================
 
 def data_file(mr_cut, zmin, zmax, njack):
-    sample_tag = f"Mr{mr_cut}_z{zmin}-{zmax}"
+    sample_tag = f"Mr{mr_cut}_z{zmin:.2f}-{zmax:.2f}"
     smu_dir    = DATA_DATE_DIR / "clustering" / "data" / sample_tag / "smu"
     pattern    = f"allcounts_BGS_BRIGHT_GCcomb_{zmin}_{zmax}_pip_angular_bitwise_log_njack{njack}_nran1_split20.npy"
     return smu_dir / pattern
 
 
 def mock_file(mr_cut, zmin, zmax, obs_seed, sig_lgv_ref, sig_lgv_slope):
-    sample_tag = f"Mr{mr_cut}_z{zmin}-{zmax}"
-    model_tag  = f"seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}"
-    smu_dir    = DATA_DATE_DIR / model_tag / "clustering" / sample_tag / "smu"
-    pattern    = f"allcounts_BGS_BRIGHT_GCcomb_{zmin}_{zmax}_default_log_njack0_nran1_split20.npy"
+    sample_tag = f"Mr{mr_cut}_z{zmin:.2f}-{zmax:.2f}"
+    paths   = make_paths(obs_seed=obs_seed, sig_lgv_ref=sig_lgv_ref,
+                         sig_lgv_slope=sig_lgv_slope)
+    smu_dir = paths["model_dir"] / "clustering" / sample_tag / "smu"
+    pattern = f"allcounts_BGS_BRIGHT_GCcomb_{zmin}_{zmax}_default_log_njack0_nran1_split20.npy"
     return smu_dir / pattern
 
 

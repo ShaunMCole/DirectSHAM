@@ -180,9 +180,14 @@ KCORR_REF_GMR = 0.77
 # make_paths()), which uses the templates below.  Do not construct
 # filenames ad-hoc in other scripts.
 
+# N_neigh_lum directory — sits between DATA_DATE_DIR and the model directory,
+# grouping all runs with the same luminosity-neighbourhood size.
+# e.g. DATA_DATE_DIR / "N_neigh_lum50/"
+NLUM_DIR_TEMPLATE = "N_neigh_lum{n_neigh_lum:d}"
+
 # Model directory name — all files for one scatter realisation live here,
-# under DATA_DATE_DIR.
-# e.g. DATA_DATE_DIR / "seed000_sig_lgv0.18_0.30/"
+# under the N_neigh_lum directory.
+# e.g. DATA_DATE_DIR / "N_neigh_lum50" / "seed000_sig_lgv0.18_0.30/"
 MODEL_DIR_TEMPLATE = "seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}"
 
 # fordata random catalogue — shared across all models; date captured by
