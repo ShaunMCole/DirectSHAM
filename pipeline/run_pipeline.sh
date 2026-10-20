@@ -18,8 +18,10 @@ export PYTHONPATH=:$SCRATCH/LSS/py:$HOME/DirectSHAM/pipeline:$PYTHONPATH
 cd ~/DirectSHAM/pipeline
 
 OBS_SEED=0
-SIG_LGV_REF=0.14
+SIG_LGV_REF=0.18
 SIG_LGV_SLOPE=0.30
+F_COLOUR=0.00
+ALPHA=0.00
 
 # 5 samples: mr_cut zmin zmax
 SAMPLES=(
@@ -36,17 +38,21 @@ echo "============================================================"
 
 echo "--- Making checkpoint (N and S) ---"
 python make_checkpoint.py --reg NS --obs_seed $OBS_SEED \
-    --sig_lgv_ref $SIG_LGV_REF --sig_lgv_slope $SIG_LGV_SLOPE
+    --sig_lgv_ref $SIG_LGV_REF --sig_lgv_slope $SIG_LGV_SLOPE \
+    --f_colour $F_COLOUR
 
 echo "--- Making mock (N must come before S) ---"
 python make_mock.py --reg N --obs_seed $OBS_SEED \
-    --sig_lgv_ref $SIG_LGV_REF --sig_lgv_slope $SIG_LGV_SLOPE
+    --sig_lgv_ref $SIG_LGV_REF --sig_lgv_slope $SIG_LGV_SLOPE \
+    --f_colour $F_COLOUR --alpha $ALPHA
 python make_mock.py --reg S --obs_seed $OBS_SEED \
-    --sig_lgv_ref $SIG_LGV_REF --sig_lgv_slope $SIG_LGV_SLOPE
+    --sig_lgv_ref $SIG_LGV_REF --sig_lgv_slope $SIG_LGV_SLOPE \
+    --f_colour $F_COLOUR --alpha $ALPHA
 
 echo "--- Splitting into NGC/SGC ---"
 python split_ngcsgc.py --obs_seed $OBS_SEED \
-    --sig_lgv_ref $SIG_LGV_REF --sig_lgv_slope $SIG_LGV_SLOPE
+    --sig_lgv_ref $SIG_LGV_REF --sig_lgv_slope $SIG_LGV_SLOPE \
+    --f_colour $F_COLOUR --alpha $ALPHA
 
 for SAMPLE in "${SAMPLES[@]}"; do
     read MR ZMIN ZMAX <<< "$SAMPLE"
@@ -58,6 +64,7 @@ for SAMPLE in "${SAMPLES[@]}"; do
     python measure_mock_clustering.py \
         --obs_seed $OBS_SEED \
         --sig_lgv_ref $SIG_LGV_REF --sig_lgv_slope $SIG_LGV_SLOPE \
+        --f_colour $F_COLOUR --alpha $ALPHA \
         --mr_cut $MR --zmin $ZMIN --zmax $ZMAX
 done
 

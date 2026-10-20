@@ -13,10 +13,10 @@ All three are run by default if no flags are given.
 Usage examples
 --------------
 # Run all three splits (typical use):
-python split_ngcsgc.py --obs_seed 0 --sig_lgv 0.10
+python split_ngcsgc.py --obs_seed 0 --sig_lgv 0.14 0.3
 
 # Run only the mock split:
-python split_ngcsgc.py --obs_seed 0 --sig_lgv 0.10 --mocks
+python split_ngcsgc.py --obs_seed 0 --sig_lgv 0.14 0.3 --mocks
 
 # Run only the fordata random split (no mock parameters needed):
 python split_ngcsgc.py --fordata
@@ -37,7 +37,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from config import DEFAULT_OBS_SEED, DEFAULT_SIG_LGV
+from config import DEFAULT_OBS_SEED, DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE, DEFAULT_F_COLOUR, DEFAULT_ALPHA
 from pipeline_utils import make_paths, write_fits_meta, check_fits_meta, setup_logging
 
 warnings.filterwarnings("ignore", category=VerifyWarning)
@@ -288,8 +288,20 @@ def parse_args():
         help=f"Observer position seed (default: {DEFAULT_OBS_SEED})",
     )
     p.add_argument(
-        "--sig_lgv", type=float, default=DEFAULT_SIG_LGV,
-        help=f"log10(Vpeak) scatter in dex (default: {DEFAULT_SIG_LGV})",
+        "--sig_lgv_ref", type=float, default=DEFAULT_SIG_LGV_REF,
+        help=f"Vpeak scatter at pivot Vpeak (default: {DEFAULT_SIG_LGV_REF})",
+    )
+    p.add_argument(
+        "--sig_lgv_slope", type=float, default=DEFAULT_SIG_LGV_SLOPE,
+        help=f"Gradient of scatter with log10(Vpeak) (default: {DEFAULT_SIG_LGV_SLOPE})",
+    )
+    p.add_argument(
+        "--f_colour", type=float, default=DEFAULT_F_COLOUR,
+        help=f"f_colour used when making the checkpoint (default: {DEFAULT_F_COLOUR})",
+    )
+    p.add_argument(
+        "--alpha", type=float, default=DEFAULT_ALPHA,
+        help=f"alpha used when making the mock (default: {DEFAULT_ALPHA})",
     )
     p.add_argument(
         "--mocks", action="store_true",
@@ -324,12 +336,18 @@ def main():
         paths.update(make_paths(
             reg=reg,
             obs_seed=args.obs_seed,
-            sig_lgv=args.sig_lgv,
+            sig_lgv_ref=args.sig_lgv_ref,
+            sig_lgv_slope=args.sig_lgv_slope,
+            f_colour=args.f_colour,
+            alpha=args.alpha,
         ))
     # Add the combined paths (no reg argument).
     paths.update(make_paths(
         obs_seed=args.obs_seed,
-        sig_lgv=args.sig_lgv,
+        sig_lgv_ref=args.sig_lgv_ref,
+        sig_lgv_slope=args.sig_lgv_slope,
+        f_colour=args.f_colour,
+        alpha=args.alpha,
     ))
 
     if args.mocks or run_all:

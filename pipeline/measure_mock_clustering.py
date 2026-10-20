@@ -167,7 +167,7 @@ def main():
                        sig_lgv_slope=args.sig_lgv_slope)
 
     # Output directories.
-    sample_tag = f"Mr{args.mr_cut}_z{args.zmin}-{args.zmax}"
+    sample_tag = f"Mr{args.mr_cut}_z{args.zmin:.2f}-{args.zmax:.2f}"
     if args.outdir:
         outdir = Path(args.outdir)
     else:

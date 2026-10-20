@@ -19,7 +19,7 @@ cd ~/DirectSHAM/pipeline
 OBS_SEED=0
 
 # sig_lgv values to scan
-SIG_LGV_VALUES=(0.08)
+SIG_LGV_VALUES=(0.20)
 
 # 5 samples: mr_cut zmin zmax 
 SAMPLES=(

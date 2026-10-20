@@ -30,6 +30,8 @@ from config import (
     MIN_VPEAK,
     N_NEIGH_VPEAK,
     N_NEIGH_LUM,
+    DEFAULT_F_COLOUR,
+    DEFAULT_ALPHA,
     NLUM_DIR_TEMPLATE,
     MODEL_DIR_TEMPLATE,
     RANCAT_FORDATA_TEMPLATE,
@@ -54,6 +56,8 @@ def make_paths(
     obs_seed=None,
     sig_lgv_ref=None,
     sig_lgv_slope=None,
+    f_colour=None,
+    alpha=None,
     cap=None,
     mr_cut=None,
     zmin=None,
@@ -126,6 +130,8 @@ def make_paths(
     mvp   = min_vpeak    if min_vpeak    is not None else MIN_VPEAK
     nnvp  = n_neigh_vpeak if n_neigh_vpeak is not None else N_NEIGH_VPEAK
     nnlum = n_neigh_lum  if n_neigh_lum  is not None else N_NEIGH_LUM
+    fc    = f_colour     if f_colour     is not None else DEFAULT_F_COLOUR
+    al    = alpha        if alpha        is not None else DEFAULT_ALPHA
 
     paths = {}
 
@@ -151,6 +157,8 @@ def make_paths(
             obs_seed=obs_seed,
             sig_lgv_ref=sig_lgv_ref,
             sig_lgv_slope=sig_lgv_slope,
+            f_colour=fc,
+            alpha=al,
         )
         paths["nlum_dir"]   = nlum_dir
         paths["model_dir"]  = model_dir

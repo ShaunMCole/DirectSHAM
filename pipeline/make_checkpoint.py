@@ -61,6 +61,8 @@ from config import (
     DEFAULT_SIG_LGV_REF,
     DEFAULT_SIG_LGV_SLOPE,
     DEFAULT_LGV_PIVOT,
+    DEFAULT_F_COLOUR,
+    DEFAULT_SEED_FCOLOUR,
     MIN_VPEAK,
     N_NEIGH_VPEAK,
     LBOX,
@@ -134,6 +136,21 @@ def parse_args():
         "--snapshot_index", type=int, default=SNAPSHOT_INDEX,
         help=(
             f"Uchuu snapshot index to use. (default: {SNAPSHOT_INDEX}, z≈0.19)"
+        ),
+    )
+    p.add_argument(
+        "--f_colour", type=float, default=DEFAULT_F_COLOUR,
+        help=(
+            f"Gaussian scatter in log10(Mpeak_Scale) applied before FracZpeak "
+            f"is computed. 0 gives pure tie-breaking noise; values ~0.03-0.10 "
+            f"progressively mix assembly-history bands. (default: {DEFAULT_F_COLOUR})"
+        ),
+    )
+    p.add_argument(
+        "--seed_fcolour", type=int, default=DEFAULT_SEED_FCOLOUR,
+        help=(
+            f"RNG seed for the f_colour noise draw, independent of the Vpeak "
+            f"scatter seed. (default: {DEFAULT_SEED_FCOLOUR})"
         ),
     )
     p.add_argument(
@@ -271,6 +288,8 @@ def write_checkpoint(subhalos_reg, reg, args, redshift, out_path, log):
         "SIGLGVREF":    args.sig_lgv_ref,
         "SIGLGVSLP":    args.sig_lgv_slope,
         "LGVPIVOT":     DEFAULT_LGV_PIVOT,
+        "FCOLOUR":      args.f_colour,
+        "SEEDFC":       args.seed_fcolour,
         "MIN_VPEAK":    args.min_vpeak,
         "NNVPEAK":      args.n_neigh_vpeak,
         "SNAPIDX":      args.snapshot_index,
@@ -303,6 +322,7 @@ def main():
         f"reg={args.reg}  obs_seed={args.obs_seed}  "
         f"sig_lgv_ref={args.sig_lgv_ref}  sig_lgv_slope={args.sig_lgv_slope}  "
         f"lgv_pivot={DEFAULT_LGV_PIVOT}  "
+        f"f_colour={args.f_colour}  seed_fcolour={args.seed_fcolour}  "
         f"min_vpeak={args.min_vpeak}  n_neigh_vpeak={args.n_neigh_vpeak}  "
         f"snapshot_index={args.snapshot_index}"
     )
@@ -327,6 +347,8 @@ def main():
             sig_lgv_slope=args.sig_lgv_slope,
             min_vpeak=args.min_vpeak,
             n_neigh_vpeak=args.n_neigh_vpeak,
+            f_colour=args.f_colour,
+            alpha=0.0,
         )
         out_paths[reg] = paths["subhalo_checkpoint"]
         log.info(f"Output checkpoint ({reg}): {out_paths[reg]}")
@@ -377,6 +399,8 @@ def main():
         sig_lgv_ref=args.sig_lgv_ref,
         sig_lgv_slope=args.sig_lgv_slope,
         lgv_pivot=DEFAULT_LGV_PIVOT,
+        f_colour=args.f_colour,
+        seed_fcolour=args.seed_fcolour,
         plot=args.plot,
     )
 

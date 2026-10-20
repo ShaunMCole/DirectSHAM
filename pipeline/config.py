@@ -163,6 +163,9 @@ NMULT_DOWNSAMPLE_SEED = 12345
 DEFAULT_SIG_LGV_REF   = 0.14
 DEFAULT_SIG_LGV_SLOPE = 0.24
 DEFAULT_LGV_PIVOT     = 2.6   # log10(Vpeak/[km/s]) pivot point
+DEFAULT_F_COLOUR      = 0.0   # Gaussian scatter in log10(Mpeak_Scale) for assembly-bias colour assignment
+DEFAULT_ALPHA         = 0.0   # Correlation between Vpeak scatter and FracZpeak (future parameter)
+DEFAULT_SEED_FCOLOUR  = 42    # RNG seed for f_colour noise
 DEFAULT_OBS_SEED = 0       # Observer position seed (0 = box centre)
 MIN_VPEAK        = 70.0    # Discard subhalos below this Vpeak [km/s]
 N_NEIGH_VPEAK    = 1000    # Neighbours used to compute FracZpeak
@@ -188,7 +191,7 @@ NLUM_DIR_TEMPLATE = "N_neigh_lum{n_neigh_lum:d}"
 # Model directory name — all files for one scatter realisation live here,
 # under the N_neigh_lum directory.
 # e.g. DATA_DATE_DIR / "N_neigh_lum50" / "seed000_sig_lgv0.18_0.30/"
-MODEL_DIR_TEMPLATE = "seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}"
+MODEL_DIR_TEMPLATE = "seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}_fc{f_colour:.2f}_al{alpha:.2f}"
 
 # fordata random catalogue — shared across all models; date captured by
 # parent directory, so not repeated in filename.

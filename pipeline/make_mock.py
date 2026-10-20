@@ -39,6 +39,8 @@ from config import (
     DEFAULT_OBS_SEED,
     DEFAULT_SIG_LGV_REF,
     DEFAULT_SIG_LGV_SLOPE,
+    DEFAULT_F_COLOUR,
+    DEFAULT_ALPHA,
     MIN_VPEAK,
     N_NEIGH_VPEAK,
     N_NEIGH_LUM,
@@ -78,6 +80,14 @@ def parse_args():
     p.add_argument(
         "--sig_lgv_slope", type=float, default=DEFAULT_SIG_LGV_SLOPE,
         help=f"Gradient of scatter with log10(Vpeak) (default: {DEFAULT_SIG_LGV_SLOPE})",
+    )
+    p.add_argument(
+        "--f_colour", type=float, default=DEFAULT_F_COLOUR,
+        help=f"Gaussian scatter in log10(Mpeak_Scale) for assembly-bias colour assignment (default: {DEFAULT_F_COLOUR})",
+    )
+    p.add_argument(
+        "--alpha", type=float, default=DEFAULT_ALPHA,
+        help=f"Correlation between Vpeak scatter and FracZpeak (default: {DEFAULT_ALPHA})",
     )
     p.add_argument(
         "--min_vpeak", type=float, default=MIN_VPEAK,
@@ -435,6 +445,7 @@ def main():
     log.info(
         f"reg={args.reg}  obs_seed={args.obs_seed}  "
         f"sig_lgv_ref={args.sig_lgv_ref}  sig_lgv_slope={args.sig_lgv_slope}  "
+        f"f_colour={args.f_colour}  alpha={args.alpha}  "
         f"n_neigh_lum={args.n_neigh_lum}  n_zbins={args.n_zbins}  "
         f"skip_randoms={args.skip_randoms}"
     )
@@ -445,6 +456,8 @@ def main():
         obs_seed=args.obs_seed,
         sig_lgv_ref=args.sig_lgv_ref,
         sig_lgv_slope=args.sig_lgv_slope,
+        f_colour=args.f_colour,
+        alpha=args.alpha,
         min_vpeak=args.min_vpeak,
         n_neigh_vpeak=args.n_neigh_vpeak,
     )
@@ -588,6 +601,8 @@ def main():
         "OBS_SEED":   args.obs_seed,
         "SIGLGVREF":  args.sig_lgv_ref,
         "SIGLGVSLP":  args.sig_lgv_slope,
+        "FCOLOUR":    args.f_colour,
+        "ALPHA":      args.alpha,
         "MIN_VPEAK":  args.min_vpeak,
         "NNVPEAK":    args.n_neigh_vpeak,
         "NNLUM":      args.n_neigh_lum,

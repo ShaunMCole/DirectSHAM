@@ -44,7 +44,7 @@ import matplotlib.patches as mpatches
 
 # Pipeline modules
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import DATA_DIR, DEFAULT_OBS_SEED, DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE
+from config import DATA_DIR, DEFAULT_OBS_SEED, DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE, DEFAULT_F_COLOUR, DEFAULT_ALPHA
 from pipeline_utils import make_paths, setup_logging
 
 
@@ -65,6 +65,10 @@ def parse_args():
                    help=f'Vpeak scatter at pivot Vpeak (default: {DEFAULT_SIG_LGV_REF})')
     p.add_argument('--sig_lgv_slope', type=float, default=DEFAULT_SIG_LGV_SLOPE,
                    help=f'Gradient of scatter with log10(Vpeak) (default: {DEFAULT_SIG_LGV_SLOPE})')
+    p.add_argument('--f_colour', type=float, default=DEFAULT_F_COLOUR,
+                   help=f'f_colour used when making the checkpoint (default: {DEFAULT_F_COLOUR})')
+    p.add_argument('--alpha', type=float, default=DEFAULT_ALPHA,
+                   help=f'alpha used when making the mock (default: {DEFAULT_ALPHA})')
     p.add_argument('--absmag_lim', type=float, default=-8.0,
                    help='Faint absolute magnitude limit applied to all catalogues '
                         'before plotting (default: -8.0, i.e. keep everything)')
@@ -558,7 +562,9 @@ def main():
         plt.ion()
 
     log = setup_logging("inspect_mocks")
-    log.info(f"reg={args.reg}  obs_seed={args.obs_seed}  sig_lgv={args.sig_lgv}")
+    log.info(f"reg={args.reg}  obs_seed={args.obs_seed}  "
+             f"sig_lgv_ref={args.sig_lgv_ref}  sig_lgv_slope={args.sig_lgv_slope}  "
+             f"f_colour={args.f_colour}  alpha={args.alpha}")
 
     # Output directory.
     if args.outdir:
@@ -566,13 +572,15 @@ def main():
     else:
         tag    = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         outdir = (DATA_DIR / "diagnostics" /
-                  f"{args.reg}_seed{args.obs_seed:03d}_sig_lgv{args.sig_lgv_ref:.2f}_{args.sig_lgv_slope:.2f}_{tag}")
+                  f"{args.reg}_seed{args.obs_seed:03d}_sig_lgv{args.sig_lgv_ref:.2f}_{args.sig_lgv_slope:.2f}"
+                  f"_fc{args.f_colour:.2f}_al{args.alpha:.2f}_{tag}")
     outdir.mkdir(parents=True, exist_ok=True)
     log.info(f"Output directory: {outdir}")
 
     # Build paths.
     paths = make_paths(reg=args.reg, obs_seed=args.obs_seed,
-                       sig_lgv_ref=args.sig_lgv_ref, sig_lgv_slope=args.sig_lgv_slope)
+                       sig_lgv_ref=args.sig_lgv_ref, sig_lgv_slope=args.sig_lgv_slope,
+                       f_colour=args.f_colour, alpha=args.alpha)
 
     # Load catalogues.
     import catalogue_analysis as ca

@@ -383,7 +383,8 @@ def compute_frac_local(z, N_neigh):
 # ii) Compute fraction of neighbours with higher zpeak
 #iii) Add scatter to Vpeak and sort again
 # iv) Trim the catalogue by applying a tailored Vpeak(z) threshold
-def pre_sort_subhalos(subhalos, N_neigh=100,sig_lgv_ref=0.0, sig_lgv_slope=0.0, lgv_pivot=2.6, plot=False):
+def pre_sort_subhalos(subhalos, N_neigh=100, sig_lgv_ref=0.0, sig_lgv_slope=0.0,
+                      lgv_pivot=2.6, f_colour=0.0, seed_fcolour=42, plot=False):
     
     start_time = time.time()
     print("Starting sort")
@@ -402,19 +403,24 @@ def pre_sort_subhalos(subhalos, N_neigh=100,sig_lgv_ref=0.0, sig_lgv_slope=0.0, 
     # compute FRAC (local rank statistic)
     # ------------------------------------------------------------------
     start_time = time.time()
-    #Remove quantization of Mpeak_Scale by adding noise in memory efficient method
-    mps = subhalos['Mpeak_Scale'] #creates a pointer to this array
-    rng = np.random.default_rng()
-    nr=len(subhalos['Mpeak_Scale'])
-    noise = rng.random(len(mps), dtype=np.float32)
-    noise -= 0.5  #centre noise at zero
-    noise *= 0.01 #scale amplitude of noise
-    mps += noise  #add noise
-    del noise  #delete temporary array
-    subhalos['FracZpeak'] = compute_frac_local_mpeak(subhalos['Mpeak_Scale'],N_neigh=N_neigh)
+    # Convert Mpeak_Scale to log10 in-place, add noise in log space, compute FracZpeak.
+    # f_colour > 0: Gaussian scatter with sigma=f_colour in log10(Mpeak_Scale) units,
+    #               large enough to mix quantization bands (~0.02-0.03 apart in log).
+    # f_colour = 0: uniform +-0.005 tie-breaking noise only (same effect as before).
+    # All operations are in-place or on a single temporary noise array to minimise
+    # memory usage — Mpeak_Scale is not needed again after FracZpeak is computed.
+    mps = subhalos['Mpeak_Scale']  # pointer to existing array — writes go back to table
+    rng_fc = np.random.default_rng(seed_fcolour)
+    if f_colour > 0.0:
+        noise = rng_fc.standard_normal(len(mps)).astype(np.float32) * np.float32(f_colour)
+    else:
+        noise = (rng_fc.random(len(mps)).astype(np.float32) - 0.5) * np.float32(0.01)
+    np.log10(mps, out=mps)  # in-place log10; Mpeak_Scale not used again after FracZpeak
+    mps += noise             # add noise in log space
+    del noise
+    subhalos['FracZpeak'] = compute_frac_local_mpeak(subhalos['Mpeak_Scale'], N_neigh=N_neigh)
     end_time = time.time()
     print(f"time to compute FracZpeak: {end_time - start_time:.4f} seconds")
-
 
     if sig_lgv_ref > 0.0 or sig_lgv_slope != 0.0:
         #Add scatter to Vpeak
