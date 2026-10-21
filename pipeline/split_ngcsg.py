@@ -13,10 +13,10 @@ All three are run by default if no flags are given.
 Usage examples
 --------------
 # Run all three splits (typical use):
-python split_ngcsgc.py --obs_seed 0 --sig_lgv 0.14 0.3
+python split_ngcsgc.py --obs_seed 0 --sig_lgv 0.10
 
 # Run only the mock split:
-python split_ngcsgc.py --obs_seed 0 --sig_lgv 0.14 0.3 --mocks
+python split_ngcsgc.py --obs_seed 0 --sig_lgv 0.10 --mocks
 
 # Run only the fordata random split (no mock parameters needed):
 python split_ngcsgc.py --fordata

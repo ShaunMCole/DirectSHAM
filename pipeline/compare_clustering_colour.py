@@ -40,7 +40,7 @@ import matplotlib.cm as cm
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pipeline_utils import setup_logging, make_paths
-from config import DATA_DATE_DIR, DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE
+from config import DATA_DATE_DIR, DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE, DEFAULT_F_COLOUR, DEFAULT_ALPHA
 
 # =============================================================================
 # Colour palette
@@ -80,8 +80,10 @@ def parse_args():
     p.add_argument(
         "--models", nargs="+", type=float, default=None,
         help=(
-            "Flat list of (ref, slope) pairs, e.g. --models 0.18 0.30  0.16 0.30. "
-            f"Default: ({DEFAULT_SIG_LGV_REF}, {DEFAULT_SIG_LGV_SLOPE})"
+            "Flat list of (ref slope f_colour alpha) groups, "
+            "e.g. --models 0.18 0.30 0.00 0.0  0.18 0.30 0.03 0.0. "
+            f"Default: ({DEFAULT_SIG_LGV_REF}, {DEFAULT_SIG_LGV_SLOPE}, "
+            f"{DEFAULT_F_COLOUR}, {DEFAULT_ALPHA})"
         ),
     )
     p.add_argument(
@@ -120,13 +122,15 @@ def parse_args():
     args = p.parse_args()
 
     if args.models is None:
-        args.model_pairs = [(DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE)]
+        args.model_pairs = [(DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE,
+                             DEFAULT_F_COLOUR, DEFAULT_ALPHA)]
     else:
-        if len(args.models) % 2 != 0:
-            p.error("--models requires an even number of values (ref slope pairs)")
+        if len(args.models) % 4 != 0:
+            p.error("--models requires groups of 4 values: ref slope f_colour alpha")
         args.model_pairs = [
-            (args.models[i], args.models[i+1])
-            for i in range(0, len(args.models), 2)
+            (args.models[i], args.models[i+1],
+             args.models[i+2], args.models[i+3])
+            for i in range(0, len(args.models), 4)
         ]
     return args
 
@@ -145,10 +149,12 @@ def data_file(mr_cut, zmin, zmax, colour, njack):
     return smu_dir / pattern
 
 
-def mock_file(mr_cut, zmin, zmax, obs_seed, sig_lgv_ref, sig_lgv_slope, colour):
+def mock_file(mr_cut, zmin, zmax, obs_seed, sig_lgv_ref, sig_lgv_slope,
+              f_colour, alpha, colour):
     sample_tag = f"Mr{mr_cut}_z{zmin:.2f}-{zmax:.2f}_{colour}"
     paths   = make_paths(obs_seed=obs_seed, sig_lgv_ref=sig_lgv_ref,
-                         sig_lgv_slope=sig_lgv_slope)
+                         sig_lgv_slope=sig_lgv_slope,
+                         f_colour=f_colour, alpha=alpha)
     smu_dir = paths["model_dir"] / "clustering" / sample_tag / "smu"
     pattern = (
         f"allcounts_BGS_BRIGHT_GCcomb_{zmin}_{zmax}_default"
@@ -229,7 +235,9 @@ def main():
     ells = [0, 2]
 
     n_models    = len(args.model_pairs)
-    mock_colours = [cm.tab10(i / 10.0) for i in range(n_models)]
+    # Distinguish multiple models by linewidth (thick vs thin) so colour
+    # remains free to encode red/blue.
+    model_lws = [2.2, 1.2, 1.6, 0.9]  # cycles if more than 4 models
 
     fig, axes = plt.subplots(3, 2, figsize=(12, 15))
     axes[2, 1].set_visible(False)
@@ -277,9 +285,10 @@ def main():
 
         # --- Mocks ---
         legend_handles = []
-        for (ref, slope), mock_col in zip(args.model_pairs, mock_colours):
+        for mi, (ref, slope, fc, al) in enumerate(args.model_pairs):
+            lw = model_lws[mi % len(model_lws)]
             for colour in args.colours:
-                mf = mock_file(mr, z0, z1, args.obs_seed, ref, slope, colour)
+                mf = mock_file(mr, z0, z1, args.obs_seed, ref, slope, fc, al, colour)
                 mock_result = load_result(mf, log)
                 if mock_result is None:
                     continue
@@ -302,21 +311,18 @@ def main():
                     chi2_str = f"{chi2/ndof:.1f}"
                     log.info(
                         f"Mr{mr} z{z0}-{z1}  ref={ref}  slope={slope}  "
-                        f"{colour}  chi2/df={chi2/ndof:.2f}"
+                        f"fc={fc}  {colour}  chi2/df={chi2/ndof:.2f}"
                     )
 
                 s_m, xi_m, _, good_m, _ = extract_multipoles(mock_result, ells)
                 s_ = s_m[good_m]
                 mock_label = (
-                    f"ref={ref} slope={slope} {colour} "
+                    f"fc={fc:.2f} {colour} "
                     f"$\\chi^2$/df={chi2_str}"
                 )
                 first = True
                 for ell in ells:
-                    # Use data colour for mock lines — solid/dashed by ell
                     line_col = DATA_COLOURS[colour]['xi0']
-                    # Lighten slightly for mock vs data distinction
-                    lw = 1.8 if n_models == 1 else 1.5
                     lbl = mock_label if first else "_nolegend_"
                     first = False
                     h, = ax.plot(s_, s_**2 * xi_m[ell][good_m],
@@ -349,10 +355,11 @@ def main():
         ax.set_ylabel(r'$s^2\xi_\ell(s)$ [Mpc$^2h^{-2}$]', fontsize=9)
         ax.tick_params(labelsize=8)
 
-    model_str = "  ".join(f"({r},{sl})" for r, sl in args.model_pairs)
+    model_str = "  ".join(f"(ref={r},sl={sl},fc={fc:.2f})"
+                          for r, sl, fc, al in args.model_pairs)
     fig.suptitle(
         f"BGS DR2 data vs Uchuu mocks — red/blue split  "
-        f"(obs_seed={args.obs_seed})  [ref, slope] = {model_str}",
+        f"(obs_seed={args.obs_seed})  {model_str}",
         fontsize=11, y=1.01,
     )
     plt.tight_layout()

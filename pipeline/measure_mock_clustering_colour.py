@@ -1,13 +1,16 @@
 """
-measure_mock_clustering.py — Apply sample selection cuts to a mock galaxy
-catalogue and its corresponding random catalogue, then measure the two-point
-correlation function multipoles ξ₀(s) and ξ₂(s) using xirunpc.py from the
-DESI LSS pipeline.
+measure_mock_clustering_colour.py — Apply colour-split sample selection cuts
+to a mock galaxy catalogue and measure the two-point correlation function
+multipoles ξ₀(s) and ξ₂(s) separately for red and blue galaxies.
 
-Unlike measure_clustering.py (which handles real data), this script uses:
-  - Unit weights throughout (no PIP, no angular upweighting)
-  - No parent catalogue symlinks needed
-  - Same xirunpc.py subprocess approach as measure_clustering.py
+The colour split follows:
+    Red:  REST_GMR_0P1 >= 0.21 - 0.03 * ABSMAG_RP1
+    Blue: REST_GMR_0P1  < 0.21 - 0.03 * ABSMAG_RP1
+
+Uses unit weights throughout (no PIP, no angular upweighting).
+Results are written into separate per-colour subdirectories:
+    clustering/Mr{mr_cut}_z{zmin}-{zmax}_red/
+    clustering/Mr{mr_cut}_z{zmin}-{zmax}_blue/
 
 Must be run on a compute node (not a login node):
     salloc --nodes=1 --qos=interactive --constraint=cpu \\
@@ -16,15 +19,13 @@ Must be run on a compute node (not a login node):
 Usage examples
 --------------
 # Default sample, default mock parameters:
-python measure_mock_clustering.py --obs_seed 0
+python measure_mock_clustering_colour.py --sig_lgv_ref 0.18 --sig_lgv_slope 0.30 \\
+    --f_colour 0.03 --alpha 0.0 --mr_cut -21.0 --zmin 0.02 --zmax 0.34
 
-# Custom magnitude and redshift cuts:
-python measure_mock_clustering.py --obs_seed 0 \\
-    --mr_cut -21.0 --zmin 0.1 --zmax 0.4
-
-# Measure NGC and SGC separately:
-python measure_mock_clustering.py --obs_seed 0 --regions NGC
-python measure_mock_clustering.py --obs_seed 0 --regions SGC
+# Measure a single colour only:
+python measure_mock_clustering_colour.py --sig_lgv_ref 0.18 --sig_lgv_slope 0.30 \\
+    --f_colour 0.03 --alpha 0.0 --mr_cut -21.0 --zmin 0.02 --zmax 0.34 \\
+    --colours red
 """
 
 import argparse
@@ -36,16 +37,36 @@ from pathlib import Path
 
 import numpy as np
 from astropy.table import Table
-import fitsio
 
 # Pipeline modules
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import DEFAULT_OBS_SEED, DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE, DEFAULT_F_COLOUR, DEFAULT_ALPHA
+from config import (
+    DEFAULT_OBS_SEED, DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE,
+    DEFAULT_F_COLOUR, DEFAULT_ALPHA,
+)
 from pipeline_utils import make_paths, setup_logging
 
 # LSS repo location
 LSS_SCRIPT = Path(os.environ.get("SCRATCH", "")) / "LSS/scripts/xirunpc.py"
 LSS_PY     = Path(os.environ.get("SCRATCH", "")) / "LSS/py"
+
+
+# =============================================================================
+# Colour cut
+# =============================================================================
+
+def colour_mask(data, colour):
+    """
+    Return a boolean mask selecting red or blue galaxies.
+
+    Red:  REST_GMR_0P1 >= 0.21 - 0.03 * ABSMAG_RP1
+    Blue: REST_GMR_0P1  < 0.21 - 0.03 * ABSMAG_RP1
+    """
+    threshold = 0.21 - 0.03 * data['ABSMAG_RP1']
+    if colour == 'red':
+        return data['REST_GMR_0P1'] >= threshold
+    else:
+        return data['REST_GMR_0P1'] < threshold
 
 
 # =============================================================================
@@ -90,17 +111,18 @@ def parse_args():
         help="Maximum redshift (default: 0.42)",
     )
     p.add_argument(
+        "--colours", nargs="+", default=["red", "blue"],
+        choices=["red", "blue"],
+        help="Which colour subsets to measure (default: red blue)",
+    )
+    p.add_argument(
         "--regions", nargs="+", default=["NGC", "SGC"],
         choices=["NGC", "SGC"],
         help="Galactic caps to measure and combine (default: NGC SGC)",
     )
     p.add_argument(
-        "--outdir", type=str, default=None,
-        help=(
-            "Output directory for clustering results. "
-            "Defaults to DATA_DIR/clustering/mocks/seed{obs_seed}_sig_lgv{sig_lgv}/"
-            "Mr{mr_cut}_z{zmin}-{zmax}/"
-        ),
+        "--data_only", action="store_true",
+        help="Measure data clustering only (skip mock).",
     )
     p.add_argument(
         "--lss_script", type=str, default=None,
@@ -110,40 +132,43 @@ def parse_args():
 
 
 # =============================================================================
-# Sample selection
+# Sample selection + colour cut
 # =============================================================================
 
-def apply_cuts(infile, outfile, mr_cut, zmin, zmax, log):
+def apply_cuts(infile, outfile, mr_cut, zmin, zmax, colour, log, is_random=False):
     """
-    Apply redshift and absolute magnitude cuts to a catalogue and write
-    the trimmed version to outfile in the format xirunpc.py expects.
+    Apply redshift, magnitude and (for data files) colour cuts, then write
+    the trimmed catalogue in the format xirunpc.py expects.
     """
     log.info(f"Reading {infile}")
-    data  = Table.read(str(infile))
+    data = Table.read(str(infile))
     log.info(f"  {len(data):,} rows")
-    log.info(f"  Columns with Z: {[c for c in data.colnames if 'Z' in c or 'z' in c]}")
 
-    # Use Zobs (redshift space) for mocks; fall back to Z if not present.
-    # Never use Z for mocks even though it exists — that would be real space.
+    # Redshift cut — use Zobs for mocks, Z for randoms
     z_col = 'Zobs' if 'Zobs' in data.colnames else 'Z'
     mask  = (data[z_col] >= zmin) & (data[z_col] <= zmax)
+
+    # Magnitude cut
     if 'ABSMAG_RP1' in data.colnames:
         mask &= (data['ABSMAG_RP1'] < mr_cut)
 
-    # xirunpc.py expects a WEIGHT column; add unit weights if not present.
+    # Colour cut — applied to mock galaxies only, not randoms
+    if not is_random and 'REST_GMR_0P1' in data.colnames:
+        mask &= colour_mask(data, colour)
+
     data_cut = data[mask]
+
+    # Ensure WEIGHT column exists
     if 'WEIGHT' not in data_cut.colnames:
         data_cut['WEIGHT'] = np.ones(len(data_cut), dtype=np.float32)
 
-    # xirunpc.py expects the redshift column to be named 'Z'.
-    # For mocks, Zobs is the redshift-space redshift; rename it to Z
-    # so that xirunpc.py uses redshift-space positions.
+    # xirunpc.py expects redshift column named 'Z'
     if 'Zobs' in data_cut.colnames:
         if 'Z' in data_cut.colnames:
-            data_cut.remove_column('Z')   # remove real-space Z
+            data_cut.remove_column('Z')
         data_cut.rename_column('Zobs', 'Z')
 
-    log.info(f"  After cuts: {len(data_cut):,} rows")
+    log.info(f"  After cuts ({colour}): {len(data_cut):,} rows")
     data_cut.write(str(outfile), format='fits', overwrite=True)
     log.info(f"  Written: {outfile}")
 
@@ -154,115 +179,100 @@ def apply_cuts(infile, outfile, mr_cut, zmin, zmax, log):
 
 def main():
     args = parse_args()
-    log  = setup_logging("measure_mock_clustering")
+    log  = setup_logging("measure_mock_clustering_colour")
     log.info(
         f"obs_seed={args.obs_seed}  sig_lgv_ref={args.sig_lgv_ref}  "
-        f"sig_lgv_slope={args.sig_lgv_slope}  "
+        f"sig_lgv_slope={args.sig_lgv_slope}  f_colour={args.f_colour}  "
+        f"alpha={args.alpha}  "
         f"mr_cut={args.mr_cut}  zmin={args.zmin}  zmax={args.zmax}  "
-        f"regions={args.regions}"
+        f"colours={args.colours}  regions={args.regions}"
     )
 
     lss_script = Path(args.lss_script) if args.lss_script else LSS_SCRIPT
     if not lss_script.exists():
-        log.error(
-            f"xirunpc.py not found at {lss_script}. "
-            "Check that $SCRATCH/LSS is set up correctly."
-        )
+        log.error(f"xirunpc.py not found at {lss_script}.")
         sys.exit(1)
 
-    # Resolve mock catalogue paths.
-    paths = make_paths(obs_seed=args.obs_seed, sig_lgv_ref=args.sig_lgv_ref,
-                       sig_lgv_slope=args.sig_lgv_slope,
-                       f_colour=args.f_colour, alpha=args.alpha)
-
-    # Output directories.
-    sample_tag = f"Mr{args.mr_cut}_z{args.zmin:.2f}-{args.zmax:.2f}"
-    if args.outdir:
-        outdir = Path(args.outdir)
-    else:
-        outdir = paths["model_dir"] / "clustering" / sample_tag
-
-    basedir = outdir / "catalogues"
-    basedir.mkdir(parents=True, exist_ok=True)
-    outdir.mkdir(parents=True, exist_ok=True)
-
-    # -------------------------------------------------------------------------
-    # Step 1: Apply sample selection cuts
-    # -------------------------------------------------------------------------
-    log.info("=== Step 1: Applying sample selection cuts ===")
-
-    for cap in args.regions:
-        # Mock galaxy catalogue
-        mock_path = paths[f"mock_{cap}"]
-        if not mock_path.exists():
-            log.error(
-                f"Mock catalogue not found: {mock_path}\n"
-                "Run make_mock.py and split_ngcsgc.py first."
-            )
-            sys.exit(1)
-        apply_cuts(
-            mock_path,
-            basedir / f"BGS_BRIGHT_{cap}_clustering.dat.fits",
-            args.mr_cut, args.zmin, args.zmax,
-            log,
-        )
-
-        # Formock random catalogue
-        ran_path = paths[f"formock_ran_{cap}"]
-        if not ran_path.exists():
-            log.error(
-                f"Formock random catalogue not found: {ran_path}\n"
-                "Run make_mock.py and split_ngcsgc.py first."
-            )
-            sys.exit(1)
-        apply_cuts(
-            ran_path,
-            basedir / f"BGS_BRIGHT_{cap}_0_clustering.ran.fits",
-            args.mr_cut, args.zmin, args.zmax,
-            log,
-        )
-
-    # -------------------------------------------------------------------------
-    # Step 2: Run xirunpc.py with unit weights and no angular upweighting
-    # -------------------------------------------------------------------------
-    log.info("=== Step 2: Running xirunpc.py ===")
+    paths = make_paths(
+        obs_seed=args.obs_seed,
+        sig_lgv_ref=args.sig_lgv_ref,
+        sig_lgv_slope=args.sig_lgv_slope,
+        f_colour=args.f_colour,
+        alpha=args.alpha,
+    )
 
     env = os.environ.copy()
     env["PYTHONPATH"] = f":{LSS_PY}:{env.get('PYTHONPATH', '')}"
 
-    cmd = [
-        "python", str(lss_script),
-        "--tracer",      "BGS_BRIGHT",
-        "--basedir",     str(basedir),
-        "--region",      *args.regions,
-        "--corr_type",   "smu",
-        "--njack",       "0",
-        "--weight_type", "default",   # unit weights, no PIP/angular upweighting
-        "--bin_type",    "log",
-        "--zlim",        str(args.zmin), str(args.zmax),
-        "--nran",        "1",
-        "--outdir",      str(outdir),
-    ]
-
-    log.info("Command: " + " ".join(cmd))
-    t0 = time.time()
-
-    result = subprocess.run(cmd, env=env)
-
-    if result.returncode != 0:
-        log.error(f"xirunpc.py failed with return code {result.returncode}")
-        sys.exit(result.returncode)
-
-    log.info(f"xirunpc.py completed in {time.time()-t0:.1f}s")
-
     # -------------------------------------------------------------------------
-    # Step 3: Report output files
+    # Mock clustering — one pass per colour
     # -------------------------------------------------------------------------
-    log.info("=== Output files ===")
-    for f in sorted(outdir.glob("*.npy")):
-        log.info(f"  {f}")
+    if not args.data_only:
+        log.info("=== Mock colour clustering ===")
 
-    log.info(f"measure_mock_clustering.py complete.  Results in: {outdir}")
+        for colour in args.colours:
+            log.info(f"--- Colour: {colour} ---")
+
+            # Each colour gets its own output directory
+            sample_tag = (
+                f"Mr{args.mr_cut}_z{args.zmin:.2f}-{args.zmax:.2f}_{colour}"
+            )
+            outdir  = paths["model_dir"] / "clustering" / sample_tag
+            basedir = outdir / "catalogues"
+            basedir.mkdir(parents=True, exist_ok=True)
+            outdir.mkdir(parents=True, exist_ok=True)
+
+            for cap in args.regions:
+                # Mock galaxy catalogue — apply colour cut
+                mock_path = paths[f"mock_{cap}"]
+                if not mock_path.exists():
+                    log.error(f"Mock catalogue not found: {mock_path}")
+                    sys.exit(1)
+                apply_cuts(
+                    mock_path,
+                    basedir / f"BGS_BRIGHT_{cap}_clustering.dat.fits",
+                    args.mr_cut, args.zmin, args.zmax, colour, log,
+                    is_random=False,
+                )
+
+                # Formock random catalogue — no colour cut on randoms
+                ran_path = paths[f"formock_ran_{cap}"]
+                if not ran_path.exists():
+                    log.error(f"Formock random catalogue not found: {ran_path}")
+                    sys.exit(1)
+                apply_cuts(
+                    ran_path,
+                    basedir / f"BGS_BRIGHT_{cap}_0_clustering.ran.fits",
+                    args.mr_cut, args.zmin, args.zmax, colour, log,
+                    is_random=True,
+                )
+
+            cmd = [
+                "python", str(lss_script),
+                "--tracer",      "BGS_BRIGHT",
+                "--basedir",     str(basedir),
+                "--region",      *args.regions,
+                "--corr_type",   "smu",
+                "--njack",       "0",
+                "--weight_type", "default",
+                "--bin_type",    "log",
+                "--zlim",        str(args.zmin), str(args.zmax),
+                "--nran",        "1",
+                "--outdir",      str(outdir),
+            ]
+            log.info("Command: " + " ".join(cmd))
+            t0 = time.time()
+            result = subprocess.run(cmd, env=env)
+            if result.returncode != 0:
+                log.error(f"xirunpc.py failed (return code {result.returncode})")
+                sys.exit(result.returncode)
+            log.info(f"xirunpc.py ({colour}) completed in {time.time()-t0:.1f}s")
+
+            log.info(f"Output files ({colour}):")
+            for f in sorted(outdir.glob("*.npy")):
+                log.info(f"  {f}")
+
+    log.info("measure_mock_clustering_colour.py complete.")
 
 
 if __name__ == "__main__":

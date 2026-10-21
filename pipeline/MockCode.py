@@ -256,7 +256,8 @@ def read_halolist_parallel(file_paths, randseed, columns, min_logMvir=10.4, min_
     for i, filename in enumerate(file_paths):
         args.append([filename,randseed*nfiles+i,columns,min_logMvir,min_Vpeak,lbox,frac_box,xobs,yobs,zobs])
         
-
+    
+    print("Start method:", multiprocessing.get_start_method())
     ncpus= multiprocessing.cpu_count()
     nworkers = min(nfiles,ncpus)
     print("ncpus=",ncpus,"nworkers",nworkers)
