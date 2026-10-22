@@ -40,7 +40,7 @@ import fitsio
 
 # Pipeline modules
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import DEFAULT_OBS_SEED, DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE
+from config import DEFAULT_OBS_SEED, DEFAULT_SIG_LGV_REF, DEFAULT_SIG_LGV_SLOPE, DEFAULT_F_COLOUR, DEFAULT_ALPHA
 from pipeline_utils import make_paths, setup_logging
 
 # LSS repo location
@@ -68,6 +68,14 @@ def parse_args():
     p.add_argument(
         "--sig_lgv_slope", type=float, default=DEFAULT_SIG_LGV_SLOPE,
         help=f"Gradient of scatter with log10(Vpeak) (default: {DEFAULT_SIG_LGV_SLOPE})",
+    )
+    p.add_argument(
+        "--f_colour", type=float, default=DEFAULT_F_COLOUR,
+        help=f"f_colour used when making the checkpoint (default: {DEFAULT_F_COLOUR})",
+    )
+    p.add_argument(
+        "--alpha", type=float, default=DEFAULT_ALPHA,
+        help=f"alpha used when making the mock (default: {DEFAULT_ALPHA})",
     )
     p.add_argument(
         "--mr_cut", type=float, default=-21.5,
@@ -164,7 +172,8 @@ def main():
 
     # Resolve mock catalogue paths.
     paths = make_paths(obs_seed=args.obs_seed, sig_lgv_ref=args.sig_lgv_ref,
-                       sig_lgv_slope=args.sig_lgv_slope)
+                       sig_lgv_slope=args.sig_lgv_slope,
+                       f_colour=args.f_colour, alpha=args.alpha)
 
     # Output directories.
     sample_tag = f"Mr{args.mr_cut}_z{args.zmin:.2f}-{args.zmax:.2f}"
@@ -230,7 +239,7 @@ def main():
         "--njack",       "0",
         "--weight_type", "default",   # unit weights, no PIP/angular upweighting
         "--bin_type",    "log",
-        "--zlim",        str(args.zmin), str(args.zmax),
+        "--zlim",        f"{args.zmin:.2f}", f"{args.zmax:.2f}",
         "--nran",        "1",
         "--outdir",      str(outdir),
     ]

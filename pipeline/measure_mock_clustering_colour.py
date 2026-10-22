@@ -256,7 +256,7 @@ def main():
                 "--njack",       "0",
                 "--weight_type", "default",
                 "--bin_type",    "log",
-                "--zlim",        str(args.zmin), str(args.zmax),
+                "--zlim",        f"{args.zmin:.2f}", f"{args.zmax:.2f}",
                 "--nran",        "1",
                 "--outdir",      str(outdir),
             ]
