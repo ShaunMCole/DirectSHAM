@@ -157,7 +157,7 @@ def mock_file(mr_cut, zmin, zmax, obs_seed, sig_lgv_ref, sig_lgv_slope,
                          f_colour=f_colour, alpha=alpha)
     smu_dir = paths["model_dir"] / "clustering" / sample_tag / "smu"
     pattern = (
-        f"allcounts_BGS_BRIGHT_GCcomb_{zmin}_{zmax}_default"
+        f"allcounts_BGS_BRIGHT_GCcomb_{zmin:.2f}_{zmax:.2f}_default"
         f"_log_njack0_nran1_split20.npy"
     )
     return smu_dir / pattern
