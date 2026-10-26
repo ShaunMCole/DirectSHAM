@@ -4,8 +4,8 @@ add_stellar_masses.py
 Add CIGALE and FastSpecFit (FSF) stellar mass / SFR columns to a mock
 catalogue by matching on TARGETID.  When a TARGETID is absent from a VAC,
 or is present but carries invalid values, a secondary "donor" galaxy is
-found that is close in redshift, absolute magnitude and rest-frame colour.
-Provenance flags record how each row was filled.
+found that is close in redshift, absolute magnitude and rest-frame colour
+(REST_GMR_0P1).  Provenance flags record how each row was filled.
 
 Flag values (cigflag / fsfflag)
     1  – direct TARGETID match with valid values
@@ -13,13 +13,10 @@ Flag values (cigflag / fsfflag)
     3  – second-pass donor (within dmag, dcol only; nearest in redshift)
    -1  – no donor found; columns are NaN
 
-NOTE on vacmatching.py internals
----------------------------------
-assign_donors_second_pass() and add_provenance_flags() both inspect
-mock['LOGM'] directly, so they are only fully correct for the CIGALE VAC.
-For the FSF VAC we call the same functions but interpret the results via
-fsfflag, which piggybacks on the LOGM state at call time.  The practical
-effect is small because FSF bad rows are a subset of CIGALE bad rows.
+The CIGALE and FSF passes are fully independent: vacmatching functions
+accept a col argument (LOGM or LOGMSTAR) that controls which column is
+inspected to identify bad rows and set unresolved values to NaN, and
+fill_cols controls which columns are updated in each pass.
 
 Usage
 -----
@@ -167,21 +164,15 @@ def process_region(reg, paths, cig, fsf, dz, dmag, dcol):
         mock, bad_cig, CIG_FILL_COLS, dz=dz, dmag=dmag, dcol=dcol
     )
     mock = vacm.assign_donors_second_pass(
-        mock, bad_cig, CIG_FILL_COLS, dmag=dmag, dcol=dcol
+        mock, bad_cig, CIG_FILL_COLS, dmag=dmag, dcol=dcol, col='LOGM'
     )
-    mock = vacm.add_provenance_flags(mock, bad_cig, donor1_cig, flag="cigflag", col='LOGM')
+    mock = vacm.add_provenance_flags(
+        mock, bad_cig, donor1_cig, flag="cigflag", col='LOGM'
+    )
     mock["cigflag"] = np.array(mock["cigflag"], dtype=np.int16)
-    print(f"POST-VACM cigflag: {type(mock['cigflag'])}, dtype={mock['cigflag'].dtype}")
-    
 
     # ------------------------------------------------------------------
     # 5. FSF donor matching
-    #
-    # vacm.assign_donors_second_pass and add_provenance_flags both
-    # inspect mock['LOGM'] internally, so they behave correctly here
-    # only if we call them while LOGM is already clean (which it is,
-    # after step 4).  The donor filling for FSF columns itself is fine
-    # because assign_donors_first/second_pass dispatch on fill_cols.
     # ------------------------------------------------------------------
     logging.info("FSF donor matching …")
     bad_fsf = vacm.find_bad_rows(mock, col="LOGMSTAR")
@@ -189,12 +180,13 @@ def process_region(reg, paths, cig, fsf, dz, dmag, dcol):
         mock, bad_fsf, FSF_FILL_COLS, dz=dz, dmag=dmag, dcol=dcol
     )
     mock = vacm.assign_donors_second_pass(
-        mock, bad_fsf, FSF_FILL_COLS, dmag=dmag, dcol=dcol
+        mock, bad_fsf, FSF_FILL_COLS, dmag=dmag, dcol=dcol, col='LOGMSTAR'
     )
-    mock = vacm.add_provenance_flags(mock, bad_fsf, donor1_fsf, flag="fsfflag", col='LOGMSTAR')
+    mock = vacm.add_provenance_flags(
+        mock, bad_fsf, donor1_fsf, flag="fsfflag", col='LOGMSTAR'
+    )
     mock["fsfflag"] = np.array(mock["fsfflag"], dtype=np.int16)
-    print(f"POST-CAST cigflag: {type(mock['cigflag'])}, dtype={mock['cigflag'].dtype}")
-    
+
     # ------------------------------------------------------------------
     # 6. Summary
     # ------------------------------------------------------------------
@@ -207,19 +199,23 @@ def process_region(reg, paths, cig, fsf, dz, dmag, dcol):
             (f == 3).sum(), (f == -1).sum(),
         )
 
-
-    # Diagnostic: check flag dtypes at each stage before writing
-    for flag_col in ("cigflag", "fsfflag"):
-        f = mock[flag_col]
-        print(f"PRE-WRITE {flag_col}: type={type(f)}, dtype={f.dtype}, "
-              f"unique={np.unique(np.asarray(f))}")
-        
+    # ------------------------------------------------------------------
     # 7. Write output
+    # ------------------------------------------------------------------
     logging.info("Writing %s …", mock_out)
+    # Drop columns before writing to keep the catalogue lean for publication.
+    # CHI2 was used in the CIGALE quality cut and is not needed downstream.
+    # Error/uncertainty columns are retained through the donor-filling process
+    # (scaled by luminosity ratio where appropriate) but are unlikely to be
+    # used in practice and add bulk to the catalogue. Restore by commenting
+    # out the relevant entries in DROP_COLS if needed.
+    DROP_COLS = ["CHI2", "LOGM_ERR", "LOGSFR_ERR", "LOGMSTAR_IVAR", "SFR_IVAR"]
+    for col in DROP_COLS:
+        if col in mock.colnames:
+            mock.remove_column(col)
     mock = Table(mock)
     mock.write(str(mock_out), overwrite=True)
     logging.info("Done.")
-
 
 # ===========================================================================
 # CLI
@@ -234,11 +230,11 @@ def parse_args():
         choices=["NGC", "SGC"],
         help="Region(s) to process (default: NGC SGC)",
     )
-    p.add_argument("--obs_seed",     type=int,   default=0)
-    p.add_argument("--sig_lgv_ref",  type=float, default=config.DEFAULT_SIG_LGV_REF)
-    p.add_argument("--sig_lgv_slope",type=float, default=config.DEFAULT_SIG_LGV_SLOPE)
-    p.add_argument("--f_colour",     type=float, default=config.DEFAULT_F_COLOUR)
-    p.add_argument("--alpha",        type=float, default=config.DEFAULT_ALPHA)
+    p.add_argument("--obs_seed",      type=int,   default=0)
+    p.add_argument("--sig_lgv_ref",   type=float, default=config.DEFAULT_SIG_LGV_REF)
+    p.add_argument("--sig_lgv_slope", type=float, default=config.DEFAULT_SIG_LGV_SLOPE)
+    p.add_argument("--f_colour",      type=float, default=config.DEFAULT_F_COLOUR)
+    p.add_argument("--alpha",         type=float, default=config.DEFAULT_ALPHA)
     p.add_argument("--fsf_cat",  type=Path, default=FSF_CAT,
                    help="Path to FSF VAC FITS file")
     p.add_argument("--cig_cat",  type=Path, default=CIG_CAT,
@@ -254,7 +250,11 @@ def parse_args():
 
 def main():
     args = parse_args()
-    setup_logging("add_stellar_masses")
+    log = setup_logging("add_stellar_masses")
+    root = logging.getLogger()
+    root.setLevel(log.level)
+    for h in log.handlers:
+        root.addHandler(h)
     logging.info("Regions: %s", args.reg)
 
     paths = make_paths(
