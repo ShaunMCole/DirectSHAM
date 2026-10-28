@@ -87,6 +87,23 @@ def save(fig, outdir, name, reg):
     logging.info("  Saved %s", fname)
 
 
+# Number of first-pass donor points to show in hexbin plots.
+# Kept small so they don't obscure the hexbin; total count shown in legend.
+N_DONOR_SUBSAMPLE = 1000
+
+
+def subsample(mask, n=N_DONOR_SUBSAMPLE, seed=42):
+    """Return a boolean mask selecting at most n random objects from mask."""
+    idx = np.where(mask)[0]
+    if len(idx) <= n:
+        return mask
+    rng = np.random.default_rng(seed)
+    chosen = rng.choice(idx, size=n, replace=False)
+    sub = np.zeros(len(mask), dtype=bool)
+    sub[chosen] = True
+    return sub
+
+
 def provenance_masks(mock, flag_col):
     f = np.asarray(mock[flag_col], dtype=np.int8)
     return {
@@ -116,10 +133,11 @@ def plot_cigale_vs_fsf(mock, outdir, reg):
                    gridsize=150, bins="log", mincnt=1, cmap="Blues", zorder=1)
     plt.colorbar(hb, ax=ax, label="N")
 
-    # Donors plotted on top of hexbin (zorder=2) so they are visible
-    ax.scatter(logmstar[d1], logm[d1],
-               s=1, c=C_DONOR1, alpha=0.05, zorder=2,
-               label=f"1st-pass donor ({d1.sum():,})")
+    # Donors plotted on top of hexbin — subsample d1 to avoid obscuring hexbin
+    d1_sub = subsample(d1)
+    ax.scatter(logmstar[d1_sub], logm[d1_sub],
+               s=1, c=C_DONOR1, alpha=1.0, zorder=2,
+               label=f"1st-pass donor ({d1.sum():,}, showing {d1_sub.sum()})")
     ax.scatter(logmstar[d2], logm[d2],
                s=12, c=C_DONOR2, alpha=1.0, zorder=3,
                label=f"2nd-pass donor ({d2.sum():,})")
@@ -158,9 +176,10 @@ def plot_mr_vs_mstar(mock, outdir, reg, vac="cigale"):
                    gridsize=150, bins="log", mincnt=1, cmap="Blues", zorder=1)
     plt.colorbar(hb, ax=ax, label="N")
 
-    ax.scatter(mr[d1], logm[d1],
-               s=1, c=C_DONOR1, alpha=0.05, zorder=2,
-               label=f"1st-pass donor ({d1.sum():,})")
+    d1_sub = subsample(d1)
+    ax.scatter(mr[d1_sub], logm[d1_sub],
+               s=1, c=C_DONOR1, alpha=1.0, zorder=2,
+               label=f"1st-pass donor ({d1.sum():,}, showing {d1_sub.sum()})")
     ax.scatter(mr[d2], logm[d2],
                s=12, c=C_DONOR2, alpha=1.0, zorder=3,
                label=f"2nd-pass donor ({d2.sum():,})")
@@ -171,6 +190,51 @@ def plot_mr_vs_mstar(mock, outdir, reg, vac="cigale"):
     ax.legend(fontsize=8, markerscale=2)
     fig.tight_layout()
     save(fig, outdir, f"mr_vs_mstar_{vac}", reg)
+
+
+# ---------------------------------------------------------------------------
+# Plot 3b – CIGALE log SFR vs FSF log SFR
+# ---------------------------------------------------------------------------
+
+def plot_cigale_vs_fsf_sfr(mock, outdir, reg):
+    pm_cig  = provenance_masks(mock, "cigflag")
+    matched = pm_cig["direct"]
+    d1      = pm_cig["donor1"]
+    d2      = pm_cig["donor2"]
+
+    logsfr_cig = np.asarray(mock["LOGSFR"], dtype=float)
+
+    sfr_fsf = np.asarray(mock["SFR"], dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        logsfr_fsf = np.where(sfr_fsf > 0, np.log10(sfr_fsf), np.nan)
+
+    # Only plot rows where both are finite
+    ok = np.isfinite(logsfr_cig) & np.isfinite(logsfr_fsf)
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+
+    hb = ax.hexbin(logsfr_fsf[ok & matched], logsfr_cig[ok & matched],
+                   gridsize=150, bins="log", mincnt=1, cmap="Blues", zorder=1)
+    plt.colorbar(hb, ax=ax, label="N")
+
+    d1_sub = subsample(ok & d1)
+    ax.scatter(logsfr_fsf[d1_sub], logsfr_cig[d1_sub],
+               s=1, c=C_DONOR1, alpha=1.0, zorder=2,
+               label=f"1st-pass donor ({(ok & d1).sum():,}, showing {d1_sub.sum()})")
+    ax.scatter(logsfr_fsf[ok & d2], logsfr_cig[ok & d2],
+               s=12, c=C_DONOR2, alpha=1.0, zorder=3,
+               label=f"2nd-pass donor ({(ok & d2).sum():,})")
+
+    lims = [-4, 3]
+    ax.plot(lims, lims, "k--", lw=0.8, alpha=0.5)
+    ax.set_xlim(lims); ax.set_ylim(lims)
+    ax.set_xlabel(r"FSF $\log\,\mathrm{SFR}\ [M_\odot\,\mathrm{yr}^{-1}]$")
+    ax.set_ylabel(r"CIGALE $\log\,\mathrm{SFR}\ [M_\odot\,\mathrm{yr}^{-1}]$")
+    ax.set_title(f"{reg}  —  direct matches: {(ok & matched).sum():,}  "
+                 f"(finite SFR in both)")
+    ax.legend(fontsize=8, markerscale=2)
+    fig.tight_layout()
+    save(fig, outdir, "cigale_vs_fsf_sfr", reg)
 
 
 # ---------------------------------------------------------------------------
@@ -194,9 +258,10 @@ def plot_colour_vs_ssfr(mock, outdir, reg):
                    gridsize=150, bins="log", mincnt=1, cmap="Blues", zorder=1)
     plt.colorbar(hb, ax=ax, label="N")
 
-    ax.scatter(colour[d1], ssfr[d1],
-               s=1, c=C_DONOR1, alpha=0.05, zorder=2,
-               label=f"1st-pass donor ({d1.sum():,})")
+    d1_sub = subsample(d1)
+    ax.scatter(colour[d1_sub], ssfr[d1_sub],
+               s=1, c=C_DONOR1, alpha=1.0, zorder=2,
+               label=f"1st-pass donor ({d1.sum():,}, showing {d1_sub.sum()})")
     ax.scatter(colour[d2], ssfr[d2],
                s=12, c=C_DONOR2, alpha=1.0, zorder=3,
                label=f"2nd-pass donor ({d2.sum():,})")
@@ -329,6 +394,9 @@ def process_region(reg, paths):
 
     logging.info("Plot 3: Mr vs FSF stellar mass")
     plot_mr_vs_mstar(mock, outdir, reg, vac="fsf")
+
+    logging.info("Plot 3b: CIGALE vs FSF SFR")
+    plot_cigale_vs_fsf_sfr(mock, outdir, reg)
 
     logging.info("Plot 4: colour vs sSFR")
     plot_colour_vs_ssfr(mock, outdir, reg)

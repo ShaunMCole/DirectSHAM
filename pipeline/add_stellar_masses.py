@@ -72,10 +72,27 @@ FSF_COLS      = ["TARGETID", "LOGMSTAR", "LOGMSTAR_IVAR", "SFR", "SFR_IVAR"]
 CIG_FILL_COLS = CIG_COLS[1:]
 FSF_FILL_COLS = FSF_COLS[1:]
 
-# Quality thresholds applied when loading the VACs
-CIG_LOGM_MIN     = 4.0    # LOGM <= this treated as invalid
-CIG_CHI2_MAX     = 17.0   # CHI2 >= this treated as invalid
+# Quality thresholds applied when loading the VACs.
+# Cuts recommended by M. Siudek (Oct 2026): LOGM>6 and CHI2<2.
+# The previous cuts (LOGM>4, CHI2<17) were too loose; the tighter CHI2<2
+# removes galaxies with poor WISE photometry (negative W1/W2 fluxes for
+# faint dwarfs) that CIGALE cannot fit. This is a photometry incompleteness,
+# not a galaxy property issue.
+CIG_LOGM_MIN     = 6.0    # LOGM <= this treated as invalid
+CIG_CHI2_MAX     = 2.0    # CHI2 >= this treated as invalid
 FSF_BAD_TARGETID = 999999
+
+# FSF h-correction: FSF LOGMSTAR and SFR are computed assuming H0=67.4
+# (h=0.674) distances, while our pipeline uses h=1 (H0=100) units.
+# Converting to h=1 adds +0.34 dex to LOGMSTAR and log(SFR), i.e. SFR
+# multiplied by 10^0.34. Note: for sSFR the h factors cancel.
+# Correction confirmed by M. Siudek (Oct 2026).
+# Stellar mass scales as d^2, so the correction is 2*log10(h_fsf/h_ours)
+# where h_fsf = 0.674 (H0=67.4) and h_ours = 1.0 (H0=100).
+# 2 * log10(1.0 / 0.674) = +0.34 dex
+H_FSF  = 0.674   # h assumed by FSF (H0=67.4 km/s/Mpc)
+H_OURS = 1.0     # h used in our pipeline (H0=100 km/s/Mpc)
+FSF_LOGM_H_CORR = 2.0 * np.log10(H_OURS / H_FSF)   # +0.34 dex
 
 # Default donor-search tolerances (can be overridden on the CLI)
 DEFAULT_DZ   = 0.02
@@ -156,6 +173,21 @@ def process_region(reg, paths, cig, fsf, dz, dmag, dcol):
         f"Row count changed after FSF join: {n_rows} -> {len(mock)}"
 
     # ------------------------------------------------------------------
+    # 3b. Apply FSF h-correction
+    # FSF values are in H0=67.4 units; convert to h=1 (H0=100) units.
+    # LOGMSTAR += 0.34 dex; SFR *= 10^0.34 (linear); ivar scales as SFR^-2.
+    # ------------------------------------------------------------------
+    logging.info("Applying FSF h-correction (+%.4f dex to LOGMSTAR and log SFR) …",
+                 FSF_LOGM_H_CORR)
+    # Only correct rows that have a valid FSF match (unmasked LOGMSTAR)
+    fsf_matched = ~np.asarray(np.ma.getmaskarray(mock["LOGMSTAR"]))
+    mock["LOGMSTAR"][fsf_matched] += FSF_LOGM_H_CORR
+    sfr_factor = 10**FSF_LOGM_H_CORR
+    mock["SFR"][fsf_matched]      *= sfr_factor
+    # IVAR scales as 1/SFR^2, so SFR_IVAR /= sfr_factor^2
+    mock["SFR_IVAR"][fsf_matched] /= sfr_factor**2
+
+    # ------------------------------------------------------------------
     # 4. CIGALE donor matching
     # ------------------------------------------------------------------
     logging.info("CIGALE donor matching …")
@@ -203,19 +235,11 @@ def process_region(reg, paths, cig, fsf, dz, dmag, dcol):
     # 7. Write output
     # ------------------------------------------------------------------
     logging.info("Writing %s …", mock_out)
-    # Drop columns before writing to keep the catalogue lean for publication.
-    # CHI2 was used in the CIGALE quality cut and is not needed downstream.
-    # Error/uncertainty columns are retained through the donor-filling process
-    # (scaled by luminosity ratio where appropriate) but are unlikely to be
-    # used in practice and add bulk to the catalogue. Restore by commenting
-    # out the relevant entries in DROP_COLS if needed.
-    DROP_COLS = ["CHI2", "LOGM_ERR", "LOGSFR_ERR", "LOGMSTAR_IVAR", "SFR_IVAR"]
-    for col in DROP_COLS:
-        if col in mock.colnames:
-            mock.remove_column(col)
     mock = Table(mock)
     mock.write(str(mock_out), overwrite=True)
     logging.info("Done.")
+    return mock_out
+
 
 # ===========================================================================
 # CLI

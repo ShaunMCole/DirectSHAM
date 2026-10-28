@@ -71,6 +71,10 @@ def split_and_write(table, col, val_ngc, val_sgc, path_ngc, path_sgc,
     """
     Split a table on a column value and write NGC and SGC subsets to disk.
 
+    FSKY in the metadata is scaled by the fraction of rows in each cap so
+    that the per-cap sky area is correct.  This requires NMULT to be the
+    same for both caps (enforced upstream in split_formock_randoms).
+
     Parameters
     ----------
     table : astropy Table
@@ -86,6 +90,26 @@ def split_and_write(table, col, val_ngc, val_sgc, path_ngc, path_sgc,
         Additional metadata to write into the output headers.
     log : logging.Logger, optional
     """
+    ngc = table[table[col] == val_ngc].copy()
+    sgc = table[table[col] == val_sgc].copy()
+
+    # Update FSKY to reflect each cap's fraction of the total footprint.
+    # Since randoms are uniform and NMULT is identical for N and S, the
+    # row count ratio equals the sky area ratio.
+    n_total = len(ngc) + len(sgc)
+    if 'FSKY' in table.meta and n_total > 0:
+        fsky_total = table.meta['FSKY']
+        fsky_ngc   = fsky_total * len(ngc) / n_total
+        fsky_sgc   = fsky_total * len(sgc) / n_total
+        ngc.meta['FSKY'] = fsky_ngc
+        sgc.meta['FSKY'] = fsky_sgc
+        msg = (f"FSKY: combined={fsky_total:.6f}  "
+               f"NGC={fsky_ngc:.6f}  SGC={fsky_sgc:.6f}")
+        if log:
+            log.info(msg)
+        else:
+            print(msg)
+
     def _write(subset, path, label):
         if drop_col and col in subset.colnames:
             del subset[col]
@@ -98,8 +122,6 @@ def split_and_write(table, col, val_ngc, val_sgc, path_ngc, path_sgc,
         else:
             print(msg)
 
-    ngc = table[table[col] == val_ngc].copy()
-    sgc = table[table[col] == val_sgc].copy()
     _write(ngc, path_ngc, "NGC")
     _write(sgc, path_sgc, "SGC")
 
@@ -184,8 +206,16 @@ def split_formock_randoms(paths, log):
             )
     log.info(f"NMULT N={nmult_N}  S={nmult_S}")
 
+    # Sum N and S FSKY explicitly before vstack — metadata_conflicts='silent'
+    # would otherwise silently drop one of the two values.
+    fsky_N = ranN.meta.get('FSKY', 0.0)
+    fsky_S = ranS.meta.get('FSKY', 0.0)
+    fsky_combined = fsky_N + fsky_S
+    log.info(f"Formock fsky: N={fsky_N:.6f}  S={fsky_S:.6f}  combined={fsky_combined:.6f}")
+
     log.info("Concatenating N + S")
     ran = vstack([ranN, ranS], metadata_conflicts='silent')
+    ran.meta['FSKY'] = fsky_combined
     del ranN, ranS
 
     log.info("Assigning NGC/SGC by galactic latitude")
@@ -204,30 +234,52 @@ def split_formock_randoms(paths, log):
 
 
 def split_fordata_randoms(paths, log):
-    """Split the combined fordata random catalogue into NGC and SGC subsets."""
+    """
+    Split the fordata random catalogues (N and S) into NGC and SGC subsets.
+
+    The N and S fordata files do not carry FSKY in their headers.  The correct
+    per-region fsky values come from ca.selection(reg)['area'], which returns
+    the actual observed footprint sky fraction.  These are combined and then
+    apportioned to NGC/SGC by row count (randoms are uniform, so row fraction
+    equals area fraction).
+    """
+    import catalogue_analysis as ca
     log.info("=== Splitting fordata randoms into NGC / SGC ===")
 
-    path_in = paths["fordata_ran"]
-    if not path_in.exists():
-        log.error(f"Input file not found: {path_in}")
-        sys.exit(1)
+    path_N = paths["fordata_ran_N"]
+    # fordata_ran_S is only present when make_paths is called with reg='S';
+    # derive it from the N path since the naming convention is consistent.
+    path_S = path_N.parent / path_N.name.replace('_N.fits', '_S.fits')
 
-    log.info(f"Reading {path_in}")
-    ran = Table.read(path_in)
+    for p in (path_N, path_S):
+        if not p.exists():
+            log.error(f"Input file not found: {p}")
+            sys.exit(1)
 
-    # The combined fordata catalogue already has a CAP column added by
-    # RandomCatalogue.ipynb when it concatenated N and S.  If it is absent
-    # (e.g. the file was written before that step was added) we compute it.
-    if 'CAP' not in ran.colnames:
-        log.info("CAP column not found — computing from RA/DEC")
-        ran = add_cap_column(ran)
+    log.info(f"Reading {path_N}")
+    ranN = Table.read(path_N)
+    log.info(f"Reading {path_S}")
+    ranS = Table.read(path_S)
 
-    path_ngc = paths["fordata_ran"].parent / (
-        paths["fordata_ran"].stem + "_NGC.fits"
-    )
-    path_sgc = paths["fordata_ran"].parent / (
-        paths["fordata_ran"].stem + "_SGC.fits"
-    )
+    # Compute combined fsky from ca.selection() — these are the correct
+    # fordata footprint sky fractions (smaller than formock, which uses a
+    # more liberal mask).
+    fsky_N = ca.selection('N')['area']
+    fsky_S = ca.selection('S')['area']
+    fsky_combined = fsky_N + fsky_S
+    log.info(f"Fordata fsky: N={fsky_N:.6f}  S={fsky_S:.6f}  combined={fsky_combined:.6f}")
+
+    # Store combined FSKY in metadata so split_and_write can apportion it.
+    log.info("Concatenating N + S")
+    ran = vstack([ranN, ranS], metadata_conflicts='silent')
+    ran.meta['FSKY'] = fsky_combined
+    del ranN, ranS
+
+    log.info("Assigning NGC/SGC by galactic latitude")
+    ran = add_cap_column(ran)
+
+    path_ngc = path_N.parent / path_N.name.replace('_N.fits', '_NGC.fits')
+    path_sgc = path_N.parent / path_N.name.replace('_N.fits', '_SGC.fits')
 
     split_and_write(
         ran, 'CAP', 'NGC', 'SGC',
