@@ -101,11 +101,22 @@ def process_file(path, master, dry_run=False):
         logging.error("  Row count changed after join: %d -> %d", n_rows, len(cat))
         return False
 
-    # Report match rate
-    n_unmatched = int(np.ma.getmaskarray(cat["LOGM"]).sum())
+    # Report match rate.
+    # Use cigflag mask to detect truly unmatched rows (no TARGETID match
+    # in master). Rows with cigflag==-1 matched but have NaN stellar mass
+    # (unresolved donors) — these are not counted as unmatched here.
+    n_unmatched = int(np.ma.getmaskarray(cat["cigflag"]).sum())
+    n_nan_logm  = int((~np.ma.getmaskarray(cat["cigflag"])) &
+                      (~np.isfinite(cat["LOGM"].filled(np.nan)
+                                   if hasattr(cat["LOGM"], "filled")
+                                   else cat["LOGM"])).sum()
+                      if hasattr(cat["cigflag"], "filled") else 0)
     logging.info("  Matched: %d / %d  (unmatched: %d, %.2f%%)",
                  n_rows - n_unmatched, n_rows,
                  n_unmatched, 100.0 * n_unmatched / n_rows)
+    if n_nan_logm > 0:
+        logging.info("  Matched but unresolved (cigflag==-1, LOGM=NaN): %d",
+                     n_nan_logm)
 
     if dry_run:
         logging.info("  DRY RUN — not writing")
