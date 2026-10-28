@@ -132,27 +132,46 @@ def load_fsf(path):
 # Per-region processing
 # ===========================================================================
 
-def process_region(reg, paths, cig, fsf, dz, dmag, dcol):
+def process_region(reg, paths, cig, fsf, dz, dmag, dcol,
+                   cat_in=None, cat_out=None):
     """
-    Load the NGC or SGC mock, match to both VACs, apply donor fallback,
+    Load a catalogue, match to both VACs, apply donor fallback,
     and write an augmented output file.
+
+    If cat_in/cat_out are provided they take precedence over the
+    mock_{reg} path from make_paths().  Use this to augment the
+    master BGS data file rather than a mock.
     """
-    mock_in  = Path(paths[f"mock_{reg}"])
-    mock_out = mock_in.with_name(mock_in.stem + "_augmented.fits")
+    if cat_in is not None:
+        mock_in  = Path(cat_in)
+        mock_out = Path(cat_out) if cat_out else \
+                   mock_in.with_name(mock_in.stem + "_augmented.fits")
+        rename_z = True    # data file has Z; rename to Zobs for vacmatching
+        label = str(mock_in.name)
+    else:
+        mock_in  = Path(paths[f"mock_{reg}"])
+        mock_out = mock_in.with_name(mock_in.stem + "_augmented.fits")
+        rename_z = False   # mock file already has Zobs
+        label = f"mock_{reg}"
 
     logging.info("=" * 60)
-    logging.info("Region: %s", reg)
-    logging.info("  Input : %s", mock_in)
-    logging.info("  Output: %s", mock_out)
+    logging.info("Input : %s", mock_in)
+    logging.info("Output: %s", mock_out)
 
     if not mock_in.exists():
-        raise FileNotFoundError(f"Mock file not found: {mock_in}")
+        raise FileNotFoundError(f"Input file not found: {mock_in}")
 
     # ------------------------------------------------------------------
-    # 1. Load mock
+    # 1. Load catalogue
     # ------------------------------------------------------------------
-    logging.info("Reading mock …")
+    logging.info("Reading %s …", label)
     mock = Table.read(str(mock_in))
+
+    # Rename Z -> Zobs so vacmatching.py can use its standard column name.
+    # We rename back before writing so the output column name matches the
+    # input.
+    if rename_z:
+        mock.rename_column("Z", "Zobs")
     n_rows = len(mock)
     logging.info("  %d rows", n_rows)
 
@@ -234,6 +253,9 @@ def process_region(reg, paths, cig, fsf, dz, dmag, dcol):
     # ------------------------------------------------------------------
     # 7. Write output
     # ------------------------------------------------------------------
+    # Rename Zobs back to Z if we renamed it on load (data catalogue mode)
+    if rename_z:
+        mock.rename_column("Zobs", "Z")
     logging.info("Writing %s …", mock_out)
     mock = Table(mock)
     mock.write(str(mock_out), overwrite=True)
@@ -269,6 +291,11 @@ def parse_args():
                    help="Absolute-magnitude tolerance for donor search")
     p.add_argument("--dcol", type=float, default=DEFAULT_DCOL,
                    help="Rest-frame colour tolerance for donor search")
+    p.add_argument("--cat", type=Path, default=None,
+                   help="Augment this catalogue instead of the mock (e.g. master BGS data file). "
+                        "Uses Z column for redshift. Ignores --reg.")
+    p.add_argument("--cat_out", type=Path, default=None,
+                   help="Output path for --cat mode (default: <stem>_augmented.fits)")
     return p.parse_args()
 
 
@@ -293,9 +320,15 @@ def main():
     cig = load_cigale(args.cig_cat)
     fsf = load_fsf(args.fsf_cat)
 
-    for reg in args.reg:
-        process_region(reg, paths, cig, fsf,
-                       dz=args.dz, dmag=args.dmag, dcol=args.dcol)
+    if args.cat is not None:
+        # Augment a specific catalogue (e.g. master BGS data file)
+        process_region(None, paths, cig, fsf,
+                       dz=args.dz, dmag=args.dmag, dcol=args.dcol,
+                       cat_in=args.cat, cat_out=args.cat_out)
+    else:
+        for reg in args.reg:
+            process_region(reg, paths, cig, fsf,
+                           dz=args.dz, dmag=args.dmag, dcol=args.dcol)
 
     logging.info("All regions complete.")
 
