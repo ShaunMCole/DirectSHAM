@@ -118,8 +118,31 @@ def provenance_masks(mock, flag_col):
 # Plot 1 – CIGALE LOGM vs FSF LOGMSTAR
 # ---------------------------------------------------------------------------
 
+def running_stats(x, y, bins=40, plo=5, phi=95, x_min=None, x_max=None):
+    """
+    Compute running median and percentiles of y in bins of x.
+    Returns (bin_centres, medians, p_lo, p_hi) with NaN where bins are empty.
+    """
+    xlo = max(np.nanpercentile(x, 0.01), x_min) if x_min is not None \
+          else np.nanpercentile(x, 0.01)
+    xhi = min(np.nanpercentile(x, 99.9), x_max) if x_max is not None \
+          else np.nanpercentile(x, 99.9)
+    edges  = np.linspace(xlo, xhi, bins + 1)
+    centres = 0.5 * (edges[:-1] + edges[1:])
+    med  = np.full(bins, np.nan)
+    qlo  = np.full(bins, np.nan)
+    qhi  = np.full(bins, np.nan)
+    for i, (lo, hi) in enumerate(zip(edges[:-1], edges[1:])):
+        mask = (x >= lo) & (x < hi) & np.isfinite(y)
+        if mask.sum() > 5:
+            med[i] = np.median(y[mask])
+            qlo[i] = np.percentile(y[mask], plo)
+            qhi[i] = np.percentile(y[mask], phi)
+    return centres, med, qlo, qhi
+
+
 def plot_cigale_vs_fsf(mock, outdir, reg):
-    pm_cig = provenance_masks(mock, "cigflag")
+    pm_cig  = provenance_masks(mock, "cigflag")
     matched = pm_cig["direct"]
     d1      = pm_cig["donor1"]
     d2      = pm_cig["donor2"]
@@ -127,30 +150,62 @@ def plot_cigale_vs_fsf(mock, outdir, reg):
     logm     = np.asarray(mock["LOGM"],    dtype=float)
     logmstar = np.asarray(mock["LOGMSTAR"], dtype=float)
 
-    fig, ax = plt.subplots(figsize=(7, 6))
+    # Only use finite values for statistics
+    ok = np.isfinite(logm) & np.isfinite(logmstar)
 
-    hb = ax.hexbin(logmstar[matched], logm[matched],
-                   gridsize=150, bins="log", mincnt=1, cmap="Blues", zorder=1)
-    plt.colorbar(hb, ax=ax, label="N")
+    # MNRAS single-column figure: 84 mm wide ~ 3.31 inches
+    FSIZE  = 7    # base font size
+    FSIZE_S = 6   # small font (legend, colorbar)
+    plt.rcParams.update({"font.size": FSIZE, "axes.labelsize": FSIZE,
+                         "xtick.labelsize": FSIZE_S, "ytick.labelsize": FSIZE_S})
+
+    fig, ax = plt.subplots(figsize=(3.31, 3.0))
+
+    hb = ax.hexbin(logmstar[matched & ok], logm[matched & ok],
+                   gridsize=100, bins="log", mincnt=1, cmap="Blues", zorder=1)
+    cb = plt.colorbar(hb, ax=ax, label="N")
+    cb.ax.tick_params(labelsize=FSIZE_S)
+    cb.set_label("N", fontsize=FSIZE_S)
 
     # Donors plotted on top of hexbin — subsample d1 to avoid obscuring hexbin
-    d1_sub = subsample(d1)
+    d1_sub = subsample(d1 & ok)
     ax.scatter(logmstar[d1_sub], logm[d1_sub],
-               s=1, c=C_DONOR1, alpha=1.0, zorder=2,
-               label=f"1st-pass donor ({d1.sum():,}, showing {d1_sub.sum()})")
-    ax.scatter(logmstar[d2], logm[d2],
-               s=12, c=C_DONOR2, alpha=1.0, zorder=3,
-               label=f"2nd-pass donor ({d2.sum():,})")
+               s=0.3, c=C_DONOR1, alpha=0.6, zorder=2,
+               label=f"1st-pass donor ({(d1 & ok).sum():,})")
+    ax.scatter(logmstar[d2 & ok], logm[d2 & ok],
+               s=3, c=C_DONOR2, alpha=1.0, zorder=3,
+               label=f"2nd-pass donor ({(d2 & ok).sum():,})")
 
-    lims = [7, 13]
-    ax.plot(lims, lims, "k--", lw=0.8, alpha=0.5)
+    lims   = [7, 13]
+    offset = -0.35   # known model offset: FSF ~0.35 dex above CIGALE
+
+    # 1:1 line
+    ax.plot(lims, lims, "k--", lw=0.6, alpha=0.5, zorder=4)
+
+    # Offset line (1:1 shifted down by 0.35 dex)
+    ax.plot(lims, [l + offset for l in lims], "k:", lw=0.8, alpha=0.7,
+            zorder=4, label=rf"1:1 $-$ {abs(offset):.2f} dex")
+
+    # Running median and percentiles of CIGALE in bins of FSF
+    xdata = logmstar[ok]
+    ydata = logm[ok]
+    bx, med, qlo, qhi = running_stats(xdata, ydata, x_max=12.3, x_min=7.0)
+    valid = np.isfinite(med)
+    ax.plot(bx[valid], med[valid], "r-", lw=1.0, zorder=5, label="Median")
+    ax.fill_between(bx[valid], qlo[valid], qhi[valid],
+                    color="red", alpha=0.2, zorder=4,
+                    label=r"5$^{\rm th}$–95$^{\rm th}$ percentile")
+
     ax.set_xlim(lims); ax.set_ylim(lims)
-    ax.set_xlabel(r"FSF $\log M_\star$")
-    ax.set_ylabel(r"CIGALE $\log M_\star$")
-    ax.set_title(f"{reg}  —  direct matches: {matched.sum():,}")
-    ax.legend(fontsize=8, markerscale=2)
-    fig.tight_layout()
+    ax.set_xlabel(r"FSF $\log(M_\star/\mathrm{M}_\odot)$")
+    ax.set_ylabel(r"CIGALE $\log(M_\star/\mathrm{M}_\odot)$")
+    # No title — caption carries this information
+    ax.legend(fontsize=FSIZE_S, markerscale=2)
+    fig.tight_layout(pad=0.5)
     save(fig, outdir, "cigale_vs_fsf_mstar", reg)
+
+    # Reset rcParams to defaults so other plots in the same run are unaffected
+    plt.rcdefaults()
 
 
 # ---------------------------------------------------------------------------
@@ -421,20 +476,45 @@ def parse_args():
     p.add_argument("--sig_lgv_slope", type=float, default=config.DEFAULT_SIG_LGV_SLOPE)
     p.add_argument("--f_colour",      type=float, default=config.DEFAULT_F_COLOUR)
     p.add_argument("--alpha",         type=float, default=config.DEFAULT_ALPHA)
+    p.add_argument("--cat", type=Path, default=None,
+                   help="Read from this catalogue instead of the mock "
+                        "(e.g. BGS_BRIGHT_6thOct_augmented.fits). "
+                        "Produces only the CIGALE vs FSF plot. "
+                        "The --reg argument is ignored.")
+    p.add_argument("--outdir", type=Path, default=None,
+                   help="Override output directory for plots")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
     log = setup_logging("inspect_stellar_masses")
-    # Attach the configured handlers to the root logger so that
-    # module-level logging.info() calls are captured.
     root = logging.getLogger()
     root.setLevel(log.level)
     for h in log.handlers:
         root.addHandler(h)
-    logging.info("Regions: %s", args.reg)
 
+    # --cat mode: produce only the CIGALE vs FSF plot from a master catalogue
+    if args.cat is not None:
+        if not args.cat.exists():
+            logging.error("Catalogue not found: %s", args.cat)
+            sys.exit(1)
+        logging.info("Reading catalogue: %s", args.cat)
+        cat = Table.read(str(args.cat))
+        logging.info("  %d rows", len(cat))
+
+        outdir = ensure_dir(args.outdir) if args.outdir else \
+                 ensure_dir(args.cat.parent / "diagnostics" / "stellar_masses")
+        logging.info("Output directory: %s", outdir)
+
+        # Use filename stem as region label (e.g. "BGS_BRIGHT_6thOct_augmented")
+        reg = args.cat.stem
+        plot_cigale_vs_fsf(cat, outdir, reg)
+        logging.info("Done.")
+        return
+
+    # Standard mock mode
+    logging.info("Regions: %s", args.reg)
     paths = make_paths(
         obs_seed=args.obs_seed,
         sig_lgv_ref=args.sig_lgv_ref,
