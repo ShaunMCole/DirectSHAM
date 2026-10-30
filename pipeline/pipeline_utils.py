@@ -193,6 +193,82 @@ def make_paths(
     return paths
 
 
+
+from pathlib import Path
+from config import (
+    DATA_DIR, DATA_DATE, DATA_DATE_DIR,
+    LIGHTCONE_DIR_TEMPLATE,
+    LC_SUBHALO_TEMPLATE,
+    LC_SHELL_MOCK_TEMPLATE,
+    LC_MOCK_TEMPLATE,
+    LC_MOCK_NGC_TEMPLATE,
+    LC_MOCK_SGC_TEMPLATE,
+)
+
+
+def make_lightcone_paths(
+    sig_lgv_ref,
+    sig_lgv_slope,
+    f_colour=0.0,
+    alpha=0.0,
+    snapshot=None,
+    reg=None,
+):
+    """
+    Return a dict of Path objects for the lightcone pipeline.
+
+    Parameters
+    ----------
+    sig_lgv_ref, sig_lgv_slope, f_colour, alpha : floats
+        Model parameters (same as make_paths).
+    snapshot : int or None
+        Snapshot index (e.g. 45).  Required for per-snapshot paths;
+        if None those entries are omitted.
+    reg : str or None
+        Region ('N' or 'S').  Required for per-region paths;
+        if None those entries are omitted.
+
+    Returns
+    -------
+    dict with keys:
+        lightcone_dir          - Path to the lightcone model directory
+        subhalo_fits           - checkpoint file (needs snapshot + reg)
+        shell_mock             - per-snapshot full-range mock (needs snapshot + reg)
+        mock_lightcone_N/S     - assembled lightcone catalogue
+        mock_lightcone_NGC/SGC - NGC/SGC split catalogues
+        clustering_dir         - clustering output directory
+    """
+    lc_dir_name = LIGHTCONE_DIR_TEMPLATE.format(
+        sig_lgv_ref=sig_lgv_ref,
+        sig_lgv_slope=sig_lgv_slope,
+        f_colour=f_colour,
+        alpha=alpha,
+    )
+    lightcone_dir = DATA_DATE_DIR / lc_dir_name
+
+    paths = dict(lightcone_dir=lightcone_dir)
+
+    # Per-snapshot, per-region paths
+    if snapshot is not None and reg is not None:
+        paths['subhalo_fits'] = lightcone_dir / LC_SUBHALO_TEMPLATE.format(
+            reg=reg, snap=snapshot
+        )
+        paths['shell_mock'] = lightcone_dir / LC_SHELL_MOCK_TEMPLATE.format(
+            reg=reg, snap=snapshot
+        )
+
+    # Assembled lightcone catalogues (no snapshot needed)
+    if reg is not None:
+        paths['mock_lightcone'] = lightcone_dir / LC_MOCK_TEMPLATE.format(reg=reg)
+
+    paths['mock_lightcone_NGC'] = lightcone_dir / LC_MOCK_NGC_TEMPLATE
+    paths['mock_lightcone_SGC'] = lightcone_dir / LC_MOCK_SGC_TEMPLATE
+
+    # Clustering output directory
+    paths['clustering_dir'] = lightcone_dir / 'clustering'
+
+    return paths
+
 # =============================================================================
 # FITS metadata helpers
 # =============================================================================

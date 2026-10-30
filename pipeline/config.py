@@ -160,8 +160,8 @@ NMULT_DOWNSAMPLE_SEED = 12345
 # Vpeak scatter parametrisation: sig_lgv = sig_lgv_ref + sig_lgv_slope * (log10(Vpeak) - 2.6)
 # sig_lgv_ref: scatter at log10(Vpeak/km/s) = 2.6  (~Mr = -21)
 # sig_lgv_slope: gradient with log10(Vpeak) (positive = more scatter for brighter/more massive haloes)
-DEFAULT_SIG_LGV_REF   = 0.14
-DEFAULT_SIG_LGV_SLOPE = 0.24
+DEFAULT_SIG_LGV_REF   = 0.18
+DEFAULT_SIG_LGV_SLOPE = 0.30
 DEFAULT_LGV_PIVOT     = 2.6   # log10(Vpeak/[km/s]) pivot point
 DEFAULT_F_COLOUR      = 0.0   # Gaussian scatter in log10(Mpeak_Scale) for assembly-bias colour assignment
 DEFAULT_ALPHA         = 0.0   # Correlation between Vpeak scatter and FracZpeak (future parameter)
@@ -193,6 +193,49 @@ NLUM_DIR_TEMPLATE = "N_neigh_lum{n_neigh_lum:d}"
 # e.g. DATA_DATE_DIR / "N_neigh_lum50" / "seed000_sig_lgv0.18_0.30/"
 MODEL_DIR_TEMPLATE = "seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}_fc{f_colour:.2f}_al{alpha:.2f}"
 
+
+
+
+# ------------------------------------------------------------------
+# Lightcone: onion-shell snapshot/redshift/boundary definitions
+# ------------------------------------------------------------------
+# Each entry: (snapshot_index, z_snap, z_shell_min, z_shell_max)
+# Boundaries are in real-space cosmological redshift (Z column), not Zobs.
+# Snapshot redshifts from MockCode.redshift_table.
+# Shell boundaries match those used by Elena Fernández-García (MockCode.py).
+LIGHTCONE_SHELLS = [
+    (50, 0.00, 0.00, 0.05),
+    (47, 0.09, 0.05, 0.10),
+    (45, 0.19, 0.10, 0.25),
+    (43, 0.30, 0.25, 0.40),
+    (41, 0.43, 0.40, 0.45),
+    (40, 0.49, 0.45, 0.50),
+]
+
+# Directory template for a lightcone model (sits alongside MODEL_DIR_TEMPLATE
+# entries inside DATA_DATE_DIR).
+LIGHTCONE_DIR_TEMPLATE = (
+    'lightcone_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}'
+    '_fc{f_colour:.2f}_al{alpha:.2f}'
+)
+
+# Filename templates for per-snapshot checkpoint and shell-mock files
+# (relative to the lightcone model directory).
+# snap is formatted as two digits with leading zero (e.g. 40, 41, … 50).
+LC_SUBHALO_TEMPLATE = 'subhalos_{reg}_snap{snap:02d}.fits'
+LC_SHELL_MOCK_TEMPLATE = 'shell_snap{snap:02d}_mock_{reg}.fits'
+
+# Final assembled lightcone catalogue names (one per region).
+LC_MOCK_TEMPLATE    = 'mock_lightcone_{reg}.fits'
+LC_MOCK_NGC_TEMPLATE = 'mock_lightcone_NGC.fits'
+LC_MOCK_SGC_TEMPLATE = 'mock_lightcone_SGC.fits'
+
+# Lightcone clustering output sits inside lightcone_dir/clustering/
+LC_CLUSTERING_TEMPLATE = (
+    '{reg}_z{zmin:.2f}-{zmax:.2f}'
+)
+
+
 # fordata random catalogue — shared across all models; date captured by
 # parent directory, so not repeated in filename.
 RANCAT_FORDATA_TEMPLATE    = "rancat_fordata_{reg}.fits"
@@ -219,3 +262,4 @@ MOCK_SGC_TEMPLATE = "mock_SGC.fits"
 CLUSTERING_TEMPLATE = (
     "xi_{cap}_Mr{mr_cut:.1f}_z{zmin:.2f}-{zmax:.2f}.npy"
 )
+

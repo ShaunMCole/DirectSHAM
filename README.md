@@ -31,9 +31,14 @@ Data files live under `$DATA_DIR` (defined in `config.py`), currently:
 with model-specific files in a subdirectory named by the model parameters,
 e.g. `N_neigh_lum50/seed000_sig_lgv0.18_0.30_fc0.00_al0.00/`.
 
+Lightcone model files live in a parallel directory:
+```
+/global/cfs/cdirs/desi/users/smcole/DirectSHAM/6thOct/lightcone_sig_lgv0.18_0.30_fc0.00_al0.00/
+```
+
 ## Pipeline scripts
 
-### Mock construction
+### Mock construction (cut-sky)
 
 | Script | Node | Description |
 |--------|------|-------------|
@@ -42,6 +47,60 @@ e.g. `N_neigh_lum50/seed000_sig_lgv0.18_0.30_fc0.00_al0.00/`.
 | `make_mock.py` | login | Runs shell-by-shell SHAM to match subhaloes to random catalogue galaxies, optionally with two-parameter colour matching via assembly history |
 | `split_ngcsgc.py` | login | Splits mock, data and random catalogues into NGC/SGC by galactic latitude; updates FSKY metadata correctly for each cap |
 | `inspect_mocks.py` | login | Diagnostic plots comparing mock and data distributions (sky, redshift, photometric, halo properties, jackknife dN/dz) |
+
+### Lightcone mock construction
+
+Produces an onion-shell lightcone mock by stacking cut-sky mocks from six
+Uchuu snapshots.  The observer is always at the box centre (obs_seed=0);
+all snapshots share this position so the geometry is consistent.  Shell
+boundaries are applied to the real-space redshift Z (not Zobs).
+
+| Script | Node | Description |
+|--------|------|-------------|
+| `make_checkpoint_snap.py` | compute | As `make_checkpoint.py` but takes `--snapshot` to select the Uchuu snapshot; writes to the lightcone model directory. Run once per snapshot (~30–60 min each). |
+| `make_mock_snap.py` | login | As `make_mock.py` but reads from the lightcone checkpoint and writes a full-redshift-range shell mock per snapshot. |
+| `make_lightcone.py` | login | Reads all six shell mocks, applies real-space redshift cuts, vstacks them, splits into NGC/SGC, and writes the final lightcone catalogues. |
+| `slurm_lightcone_checkpoint.sh` | SLURM | Job array (tasks 0–5) running `make_checkpoint_snap.py` for all six snapshots in parallel. |
+| `slurm_lightcone_mock.sh` | SLURM | Job array (tasks 0–11) running `make_mock_snap.py` for all six snapshots × two regions. |
+
+**Lightcone shells** (from `LIGHTCONE_SHELLS` in `config.py`):
+
+| Shell | z range | Snapshot | z_snap |
+|-------|---------|----------|--------|
+| 0 | 0.00–0.05 | 50 | 0.00 |
+| 1 | 0.05–0.10 | 47 | 0.09 |
+| 2 | 0.10–0.25 | 45 | 0.19 |
+| 3 | 0.25–0.40 | 43 | 0.30 |
+| 4 | 0.40–0.45 | 41 | 0.43 |
+| 5 | 0.45–0.50 | 40 | 0.49 |
+
+**Workflow:**
+```bash
+REF=0.18; SLOPE=0.30; FC=0.00; AL=0.00
+
+# 1. Run 6 checkpoint jobs (SLURM job array, ~1 hr each)
+#    Snap45 can be symlinked from the existing cut-sky checkpoint instead.
+sbatch pipeline/slurm_lightcone_checkpoint.sh
+
+# 2. Run 12 mock jobs after checkpoints complete
+sbatch --dependency=afterok:<jobid> pipeline/slurm_lightcone_mock.sh
+
+# 3. Assemble final lightcone catalogues (login node)
+python pipeline/make_lightcone.py \
+    --sig_lgv_ref $REF --sig_lgv_slope $SLOPE --f_colour $FC --alpha $AL
+```
+
+**Snap45 shortcut:** since the cut-sky pipeline already produced a checkpoint
+for snapshot 45, you can symlink it into the lightcone directory rather than
+rerunning the expensive checkpoint job:
+```bash
+LC=data/6thOct/lightcone_sig_lgv0.18_0.30_fc0.00_al0.00
+CS=data/6thOct/N_neigh_lum50/seed000_sig_lgv0.18_0.30_fc0.00_al0.00
+mkdir -p $LC
+ln -s $PWD/$CS/subhalos_N_70.0_N_neigh_vpeak1000.fits $LC/subhalos_N_snap45.fits
+ln -s $PWD/$CS/subhalos_S_70.0_N_neigh_vpeak1000.fits $LC/subhalos_S_snap45.fits
+```
+Then cancel SLURM array task 2 before submitting the checkpoint job array.
 
 ### Stellar mass and SFR augmentation
 
@@ -75,8 +134,8 @@ e.g. `N_neigh_lum50/seed000_sig_lgv0.18_0.30_fc0.00_al0.00/`.
 
 | File | Description |
 |------|-------------|
-| `config.py` | Central configuration: data paths, default parameters, cosmology |
-| `pipeline_utils.py` | Shared utilities: `setup_logging()`, `make_paths()`, `write_fits_meta()` |
+| `config.py` | Central configuration: data paths, default parameters, cosmology, lightcone shell definitions |
+| `pipeline_utils.py` | Shared utilities: `setup_logging()`, `make_paths()`, `make_lightcone_paths()`, `write_fits_meta()` |
 
 ## Scatter parametrisation
 
@@ -133,7 +192,8 @@ Provenance flags (cigflag / fsfflag): 1 = direct TARGETID match,
 ## Computing environment
 
 All work runs on NERSC Perlmutter. Login nodes are sufficient for most steps;
-compute nodes are required for `make_checkpoint.py` and the clustering scripts.
+compute nodes are required for `make_checkpoint.py`, `make_checkpoint_snap.py`
+and the clustering scripts.
 
 ```bash
 # Allocate an interactive compute node
@@ -178,11 +238,11 @@ FlatLambdaCDM(H0=100, Om0=0.313, Tcmb0=2.725)
 | `lgv_pivot` | 2.6 | log₁₀(V_piv) pivot point |
 | `f_colour` | 0.0 | Assembly-bias colour scatter parameter σ_col |
 | `alpha` | 0.0 | Correlated scatter parameter α_v |
-| `obs_seed` | 0 | Observer position seed |
+| `obs_seed` | 0 | Observer position seed (0 = box centre) |
 | `min_Vpeak` | 70 km/s | Minimum subhalo Vpeak |
 | `N_neigh_vpeak` | 1000 | Neighbours for FracZpeak estimate |
 | `N_neigh_lum` | 50 | Neighbours for colour matching |
-| `nzbins` | 100 | Number of redshift shells for SHAM |
+| `nzbins` | 200 | Number of redshift shells for SHAM |
 | `Δz` | 0.03 | Redshift window for random catalogue cloning |
 
 ## Typical workflow
@@ -195,12 +255,10 @@ REF=0.18; SLOPE=0.30; FC=0.00; AL=0.00; SEED=0
 python pipeline/make_random.py
 
 # 2. Build the subhalo checkpoint (compute node, ~1 hr)
-python pipeline/make_checkpoint.py --reg N --obs_seed $SEED \
-    --sig_lgv_ref $REF --sig_lgv_slope $SLOPE
-python pipeline/make_checkpoint.py --reg S --obs_seed $SEED \
+python pipeline/make_checkpoint.py --reg NS --obs_seed $SEED \
     --sig_lgv_ref $REF --sig_lgv_slope $SLOPE
 
-# 3. Run SHAM to produce mock (login node, N before S)
+# 3. Run SHAM to produce mock (login node)
 python pipeline/make_mock.py --reg N --obs_seed $SEED \
     --sig_lgv_ref $REF --sig_lgv_slope $SLOPE
 python pipeline/make_mock.py --reg S --obs_seed $SEED \
@@ -255,11 +313,13 @@ python pipeline/plot_nz_mstar.py \
 | Fordata randoms | `$DATA_DIR/6thOct/rancat_fordata_{N,S,NGC,SGC}.fits` |
 | Formock randoms | `$DATA_DIR/6thOct/rancat_formock_{N,S,NGC,SGC}.fits` |
 | Mock catalogues | `$DATA_DIR/6thOct/N_neigh_lum50/seed000_sig_lgv0.18_0.30_fc0.00_al0.00/mock_{N,S,NGC,SGC}.fits` |
+| Lightcone catalogues | `$DATA_DIR/6thOct/lightcone_sig_lgv0.18_0.30_fc0.00_al0.00/mock_lightcone_{N,S,NGC,SGC}.fits` |
+| Lightcone checkpoints | `$DATA_DIR/6thOct/lightcone_sig_lgv0.18_0.30_fc0.00_al0.00/subhalos_{N,S}_snap{40,41,43,45,47,50}.fits` |
 | Master augmented BGS | `$DATA_DIR/6thOct/BGS_BRIGHT_6thOct_augmented.fits` |
 | Clustering output | `$DATA_DIR/6thOct/.../clustering/` |
 | CIGALE VAC (v2.0) | `/global/cfs/cdirs/desi/science/gqp/y3gqp/v2.0/st_mass_MS_cigale/BGS_BRIGHT-loa-LSSv2.1-cigale-v1.0.fits` |
 | FSF VAC | `/global/cfs/cdirs/desicollab/science/gqp/y3gqp/v1.0/parent/BGS_ANY-y3gqp-parent-fsf-v1.0.fits` |
-| Uchuu halo catalogues | `/global/cfs/cdirs/desi/mocks/cai/Uchuu-SHAM/Uchuu-halo-catalogs/` |
+| Uchuu halo catalogues | `/global/cfs/cdirs/desi/mocks/cai/Uchuu-SHAM/Uchuu-halo-catalogs/halodir_{index:03d}/` |
 | Log files | `~/DirectSHAM/logs/` |
 
 ## Dependencies
@@ -282,3 +342,5 @@ Shaun Cole (Durham ICC), with contributions from Elena Fernández-García (IAA G
 - Fernández-García E. et al., 2026, JCAP, 2026, 002
 - Moustakas J. et al., 2023 (FastSpecFit)
 - Siudek M. et al., 2024 (CIGALE for DESI BGS)
+- Smith A. et al., 2022, MNRAS, 516, 1062
+- Kitzbichler M. G. & White S. D. M., 2007, MNRAS, 376, 2
