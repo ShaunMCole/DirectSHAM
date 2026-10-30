@@ -252,44 +252,93 @@ def plot_mr_vs_mstar(mock, outdir, reg, vac="cigale"):
 # ---------------------------------------------------------------------------
 
 def plot_cigale_vs_fsf_sfr(mock, outdir, reg):
+    """
+    Plot log10 sSFR (CIGALE) vs log10 sSFR (FSF).
+
+    CIGALE:  log10 sSFR = LOGSFR - LOGM          [both already log10]
+    FSF:     log10 sSFR = log10(SFR) - LOGMSTAR  [SFR is linear, LOGMSTAR is log10]
+    Units: yr^-1
+    """
     pm_cig  = provenance_masks(mock, "cigflag")
     matched = pm_cig["direct"]
     d1      = pm_cig["donor1"]
     d2      = pm_cig["donor2"]
 
+    # CIGALE log10 sSFR
     logsfr_cig = np.asarray(mock["LOGSFR"], dtype=float)
+    logm_cig   = np.asarray(mock["LOGM"],   dtype=float)
+    logssfr_cig = logsfr_cig - logm_cig
 
-    sfr_fsf = np.asarray(mock["SFR"], dtype=float)
+    # FSF log10 sSFR
+    sfr_fsf    = np.asarray(mock["SFR"],     dtype=float)
+    logm_fsf   = np.asarray(mock["LOGMSTAR"], dtype=float)
     with np.errstate(divide="ignore", invalid="ignore"):
         logsfr_fsf = np.where(sfr_fsf > 0, np.log10(sfr_fsf), np.nan)
+    logssfr_fsf = logsfr_fsf - logm_fsf
 
     # Only plot rows where both are finite
-    ok = np.isfinite(logsfr_cig) & np.isfinite(logsfr_fsf)
+    ok = np.isfinite(logssfr_cig) & np.isfinite(logssfr_fsf)
 
-    fig, ax = plt.subplots(figsize=(7, 6))
+    lims    = [-14, -7]
+    ssfr_cut = -11.0   # CIGALE passive/SF boundary (M. Siudek)
+    bins_marg = np.linspace(lims[0], lims[1], 120)
 
-    hb = ax.hexbin(logsfr_fsf[ok & matched], logsfr_cig[ok & matched],
-                   gridsize=150, bins="log", mincnt=1, cmap="Blues", zorder=1)
-    plt.colorbar(hb, ax=ax, label="N")
+    # Layout: main hexbin + right marginal + top marginal
+    fig = plt.figure(figsize=(8, 7))
+    gs  = fig.add_gridspec(2, 2,
+                           width_ratios=[4, 1], height_ratios=[1, 4],
+                           hspace=0.04, wspace=0.04)
+    ax      = fig.add_subplot(gs[1, 0])   # main panel
+    ax_top  = fig.add_subplot(gs[0, 0], sharex=ax)  # FSF marginal (top)
+    ax_rgt  = fig.add_subplot(gs[1, 1], sharey=ax)  # CIGALE marginal (right)
+
+    # --- Main hexbin ---
+    hb = ax.hexbin(logssfr_fsf[ok & matched], logssfr_cig[ok & matched],
+                   gridsize=120, bins="log", mincnt=1, cmap="Blues", zorder=1)
+    cb = fig.colorbar(hb, ax=ax_rgt, label="N", fraction=0.15, pad=0.04)
+    cb.ax.tick_params(labelsize=8)
 
     d1_sub = subsample(ok & d1)
-    ax.scatter(logsfr_fsf[d1_sub], logsfr_cig[d1_sub],
+    ax.scatter(logssfr_fsf[d1_sub], logssfr_cig[d1_sub],
                s=1, c=C_DONOR1, alpha=1.0, zorder=2,
                label=f"1st-pass donor ({(ok & d1).sum():,}, showing {d1_sub.sum()})")
-    ax.scatter(logsfr_fsf[ok & d2], logsfr_cig[ok & d2],
+    ax.scatter(logssfr_fsf[ok & d2], logssfr_cig[ok & d2],
                s=12, c=C_DONOR2, alpha=1.0, zorder=3,
                label=f"2nd-pass donor ({(ok & d2).sum():,})")
 
-    lims = [-4, 3]
     ax.plot(lims, lims, "k--", lw=0.8, alpha=0.5)
+
+    # CIGALE SF/Q cut line (horizontal)
+    ax.axhline(ssfr_cut, color="tab:orange", lw=1.2, ls="--", zorder=5,
+               label=rf"CIGALE cut $\log\,\mathrm{{sSFR}}={ssfr_cut}$")
+
     ax.set_xlim(lims); ax.set_ylim(lims)
-    ax.set_xlabel(r"FSF $\log\,\mathrm{SFR}\ [M_\odot\,\mathrm{yr}^{-1}]$")
-    ax.set_ylabel(r"CIGALE $\log\,\mathrm{SFR}\ [M_\odot\,\mathrm{yr}^{-1}]$")
-    ax.set_title(f"{reg}  —  direct matches: {(ok & matched).sum():,}  "
-                 f"(finite SFR in both)")
-    ax.legend(fontsize=8, markerscale=2)
+    ax.set_xlabel(r"FSF $\log_{10}\,\mathrm{sSFR}\ [\mathrm{yr}^{-1}]$")
+    ax.set_ylabel(r"CIGALE $\log_{10}\,\mathrm{sSFR}\ [\mathrm{yr}^{-1}]$")
+    ax.legend(fontsize=7, markerscale=2, loc="upper left")
+
+    # --- Top marginal: FSF sSFR ---
+    kw = dict(bins=bins_marg, density=True, histtype="step", lw=1.2)
+    ax_top.hist(logssfr_fsf[ok & matched], color="steelblue",
+                label="FSF", **kw)
+    ax_top.set_ylabel("Density", fontsize=8)
+    ax_top.tick_params(labelbottom=False, labelsize=7)
+    ax_top.set_xlim(lims)
+
+    # --- Right marginal: CIGALE sSFR ---
+    ax_rgt.hist(logssfr_cig[ok & matched], bins=bins_marg, density=True,
+                histtype="step", lw=1.2, color="tab:red",
+                orientation="horizontal", label="CIGALE")
+    # Show the cut on the marginal too
+    ax_rgt.axhline(ssfr_cut, color="tab:orange", lw=1.2, ls="--")
+    ax_rgt.tick_params(labelleft=False, labelsize=7)
+    ax_rgt.set_xlabel("Density", fontsize=8)
+    ax_rgt.set_ylim(lims)
+
+    fig.suptitle(f"{reg}  —  direct matches: {(ok & matched).sum():,}  "
+                 f"(finite sSFR in both)", fontsize=9)
     fig.tight_layout()
-    save(fig, outdir, "cigale_vs_fsf_sfr", reg)
+    save(fig, outdir, "cigale_vs_fsf_ssfr", reg)
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +499,7 @@ def process_region(reg, paths):
     logging.info("Plot 3: Mr vs FSF stellar mass")
     plot_mr_vs_mstar(mock, outdir, reg, vac="fsf")
 
-    logging.info("Plot 3b: CIGALE vs FSF SFR")
+    logging.info("Plot 3b: CIGALE vs FSF sSFR")
     plot_cigale_vs_fsf_sfr(mock, outdir, reg)
 
     logging.info("Plot 4: colour vs sSFR")
