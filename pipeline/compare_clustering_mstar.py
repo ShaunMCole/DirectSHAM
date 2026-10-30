@@ -37,7 +37,7 @@ SAMPLES = [
     dict(cig_cut= 8.90, fsf_cut= 9.25, zmin=0.02, zmax=0.17),
 ]
 
-YMAX = {11.10: 150, 10.60: 120, 10.10: 99.99, 9.50: 99.99, 8.90: 99.99}
+YMAX = {11.10: 150, 10.60: 119.99, 10.10: 99.99, 9.50: 99.99, 8.90: 99.99}
 
 # Colours matching S5PanelClustering2 palette
 COL_XI0_DATA = '#1f1f1f'
@@ -160,23 +160,41 @@ def main():
         ymin = -ymax * 0.5
 
         # ------------------------------------------------------------------
-        # Data (CIGALE selection)
+        # Data — separate estimates for CIGALE and FSF selections
+        # CIGALE: filled symbols (black/grey)
+        # FSF:    open symbols (dark red / dark green) to match mock colours
         # ------------------------------------------------------------------
-        data_result = load_result(data_npy("cig", cig_cut, zmin, zmax))
         legend_handles = []
-        s_d = xi_dat_g = err_dat_g = None
+        # Store CIGALE data for chi2 computation against CIGALE mock
+        s_d_cig = xi_dat_cig = err_dat_cig = None
+        s_d_fsf = xi_dat_fsf = err_dat_fsf = None
 
-        if data_result is not None:
+        # CIGALE xi0=red, xi2=dark red; FSF xi0=green, xi2=dark green
+        # All data points are circles, distinguished by colour only
+        for sample_type, cut, styles, tag in [
+            ("cig", cig_cut,
+             [(0, 'o', COL_CIG_XI0, r'CIGALE $\xi_0$'),
+              (2, 'o', '#8b0000',   r'CIGALE $\xi_2$')],
+             "cig"),
+            ("fsf", fsf_cut,
+             [(0, 'o', COL_FSF_XI0, r'FSF $\xi_0$'),
+              (2, 'o', '#145a32',   r'FSF $\xi_2$')],
+             "fsf"),
+        ]:
+            dr = load_result(data_npy(sample_type, cut, zmin, zmax))
+            if dr is None:
+                continue
             s_dat, xi_dat, err_dat, good_dat, has_cov = extract_multipoles(
-                data_result, ells)
+                dr, ells)
             s_d       = s_dat[good_dat]
             xi_dat_g  = {ell: xi_dat[ell][good_dat]  for ell in ells}
             err_dat_g = {ell: err_dat[ell][good_dat]  for ell in ells}
+            if tag == "cig":
+                s_d_cig, xi_dat_cig, err_dat_cig = s_d, xi_dat_g, err_dat_g
+            else:
+                s_d_fsf, xi_dat_fsf, err_dat_fsf = s_d, xi_dat_g, err_dat_g
 
-            for ell, fmt, col, lbl in [
-                (0, 'o', COL_XI0_DATA, r'Data $\xi_0$'),
-                (2, 's', COL_XI2_DATA, r'Data $\xi_2$'),
-            ]:
+            for ell, fmt, col, lbl in styles:
                 y    = s_d**2 * xi_dat_g[ell]
                 yerr = s_d**2 * err_dat_g[ell]
                 if has_cov and np.any(err_dat_g[ell] > 0):
@@ -191,11 +209,13 @@ def main():
         # ------------------------------------------------------------------
         # Mocks: CIGALE (red) then FSF (green)
         # ------------------------------------------------------------------
-        for sample_type, cut, col0, col2, vac_lbl in [
+        for sample_type, cut, col0, col2, vac_lbl, s_d_ref, xi_ref, err_ref in [
             ("cig", cig_cut, COL_CIG_XI0, COL_CIG_XI2,
-             f"CIGALE ${cig_cut:.2f}$"),
+             "CIGALE mock",
+             s_d_cig, xi_dat_cig, err_dat_cig),
             ("fsf", fsf_cut, COL_FSF_XI0, COL_FSF_XI2,
-             f"FSF ${fsf_cut:.2f}$"),
+             "FSF mock",
+             s_d_fsf, xi_dat_fsf, err_dat_fsf),
         ]:
             mock_result = load_result(mock_npy(sample_type, cut,
                                                zmin, zmax, paths))
@@ -206,8 +226,8 @@ def main():
             xi_m_g = {ell: xi_m[ell][good_m] for ell in ells}
 
             chi2_str = "?"
-            if s_d is not None:
-                chi2, ndof = compute_chi2(s_d, xi_dat_g, err_dat_g,
+            if s_d_ref is not None:
+                chi2, ndof = compute_chi2(s_d_ref, xi_ref, err_ref,
                                           s_m[good_m], xi_m_g, ells,
                                           args.smin, args.smax)
                 chi2_str = f"{chi2/ndof:.1f}"
@@ -224,16 +244,25 @@ def main():
         # Sample label — bottom left
         # ------------------------------------------------------------------
         ax.text(0.03, 0.04,
-                rf"$\log M_\star>{cig_cut:.2f}$,  "
+                rf"CIGALE ${cig_cut:.2f}$   FSF ${fsf_cut:.2f}$"
+                "\n"
                 rf"${zmin:.2f}\leq z\leq{zmax:.2f}$",
                 transform=ax.transAxes, fontsize=8, va='bottom', ha='left',
                 bbox=dict(boxstyle='round,pad=0.2', fc='white',
                           alpha=0.7, ec='none'))
 
-        # Curve legend — top panel only, all handles
+        # Panel 0: data symbols only; Panel 1: mock lines only
         if i == 0:
-            ax.legend(handles=legend_handles, fontsize=7,
+            data_h = [h for h in legend_handles
+                      if 'mock' not in h.get_label()]
+            ax.legend(handles=data_h, fontsize=7,
                       loc='upper left', framealpha=0.8)
+        elif i == 1:
+            mock_h = [h for h in legend_handles
+                      if 'mock' in h.get_label()]
+            if mock_h:
+                ax.legend(handles=mock_h, fontsize=7,
+                          loc='upper left', framealpha=0.8)
 
         ax.axhline(0, color='k', lw=0.7, ls='--')
         ax.set_xscale('log')
