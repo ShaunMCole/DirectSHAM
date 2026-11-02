@@ -264,7 +264,7 @@ def main():
 
     # Locate halo files
     halodir    = UCHUU_HALODIR_TEMPLATE.format(index=snapshot)
-    file_paths = sorted(glob.glob(os.path.join(halodir, '*.hdf5')))
+    file_paths = sorted(glob.glob(os.path.join(halodir, 'halolist_*.h5')))
     if not file_paths:
         raise FileNotFoundError(f'No hdf5 files in {halodir}')
     logger.info(f'Reading {len(file_paths)} halo files from {halodir}')
