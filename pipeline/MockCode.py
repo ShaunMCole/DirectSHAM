@@ -259,7 +259,7 @@ def read_halolist_parallel(file_paths, randseed, columns, min_logMvir=10.4, min_
     
     print("Start method:", multiprocessing.get_start_method())
     ncpus= multiprocessing.cpu_count()
-    nworkers = min(nfiles,ncpus)
+    nworkers = min(nfiles,min(ncpus,32))
     print("ncpus=",ncpus,"nworkers",nworkers)
     with multiprocessing.Pool(nworkers) as pool:
         file_results = pool.starmap(read_halolist_file_reps, args)
