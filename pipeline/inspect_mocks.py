@@ -265,16 +265,33 @@ def plot_redshift(dat, mock, ran, ran_inp, reg, outdir, show, log):
     colors  = ['C0', 'C1', 'C2', 'C3', 'C4']
     eps     = 1e-25
 
+    # Print header for n(z) table
+    print(f"\n{'z_cen':>6}  {'Mcut':>6}  {'n_data':>10}  {'n_ran':>10}  {'n_mock':>10}")
+    print("-" * 50)
+
     for Mcut, c in zip(magcuts, colors):
-        h, _ = np.histogram(dat['Z'][dat['ABSMAG_RP1'] < Mcut], bins=zbins,
+        # Data (scatter, plotted first)
+        h_dat_cut, _ = np.histogram(dat['Z'][dat['ABSMAG_RP1'] < Mcut], bins=zbins,
                             weights=dat['WEIGHT'][dat['ABSMAG_RP1'] < Mcut])
-        ax.scatter(zcen, np.log10(h / vol_dat + eps), color=c, s=10, marker='o',
+        nz_dat = h_dat_cut / vol_dat
+        ax.scatter(zcen, np.log10(nz_dat + eps), color=c, s=10, marker='o',
                    label=rf'$M_r < {Mcut:.1f}$')
-        h, _ = np.histogram(mock['Z'][mock['ABSMAG_RP1'] < Mcut], bins=zbins)
-        ax.plot(zcen, np.log10(h * nmult_formock / len(ran) / vol + eps),
-                color=c, lw=2, ls='--')
-        h, _ = np.histogram(ran['Z'][ran['ABSMAG_RP1'] < Mcut], bins=zbins)
-        ax.plot(zcen, np.log10(h / (vol * nmult_formock) + eps), color=c, lw=2)
+
+        # Randoms (solid, plotted second)
+        h_ran_cut, _ = np.histogram(ran['Z'][ran['ABSMAG_RP1'] < Mcut], bins=zbins)
+        nz_ran = h_ran_cut / (vol * nmult_formock)
+        ax.plot(zcen, np.log10(nz_ran + eps), color=c, lw=2)
+
+        # Mock (dashed, plotted last so it appears on top)
+        h_mock_cut, _ = np.histogram(mock['Z'][mock['ABSMAG_RP1'] < Mcut], bins=zbins)
+        nz_mock = h_mock_cut / vol
+        ax.plot(zcen, np.log10(nz_mock + eps), color=c, lw=2, ls='--')
+
+        # Print n(z) table for this magnitude cut
+        for i in range(0, len(zcen), 5):   # every 5th bin to keep it manageable
+            print(f"{zcen[i]:6.3f}  {Mcut:6.1f}  {nz_dat[i]:10.4e}  "
+                  f"{nz_ran[i]:10.4e}  {nz_mock[i]:10.4e}")
+        print()
 
     handles_extra = [
         mlines.Line2D([], [], marker='o', color='none', markerfacecolor='k',
@@ -292,13 +309,16 @@ def plot_redshift(dat, mock, ran, ran_inp, reg, outdir, show, log):
     savefig(fig, outdir, 'nz_by_magcut', show, log)
 
     # --- Mock Z vs matched Zr ---
-    fig, ax = plt.subplots(figsize=(6, 5))
-    ax.scatter(mock['Z'], mock['Zr'], s=1, alpha=0.3, rasterized=True)
-    ax.set_xlabel('Z  (subhalo cosmological redshift)')
-    ax.set_ylabel('Zr  (matched random galaxy redshift)')
-    ax.set_title('SHAM redshift matching diagnostic')
-    plt.tight_layout()
-    savefig(fig, outdir, 'z_vs_zr', show, log)
+    if 'Zr' in mock.colnames:
+        fig, ax = plt.subplots(figsize=(6, 5))
+        ax.scatter(mock['Z'], mock['Zr'], s=1, alpha=0.3, rasterized=True)
+        ax.set_xlabel('Z  (subhalo cosmological redshift)')
+        ax.set_ylabel('Zr  (matched random galaxy redshift)')
+        ax.set_title('SHAM redshift matching diagnostic')
+        plt.tight_layout()
+        savefig(fig, outdir, 'z_vs_zr', show, log)
+    else:
+        log.info("Skipping z_vs_zr plot (Zr column not present in mock)")
 
 
 # =============================================================================
@@ -348,7 +368,7 @@ def plot_jackknife_dndz(dat, mock, ran, reg, outdir, show, log):
     ax.plot(zcen, h_dat,  color='black', lw=2, label='BGS data')
     ax.plot(zcen, h_ran,  color='red',   lw=2, label='Randoms')
     ax.plot(zcen, h_mock, color='blue',  lw=2, ls='--', label='Mock')
-    ax.set_xlim(0, 0.6);  ax.set_ylim(bottom=0)
+    ax.set_xlim(0, 0.5);  ax.set_ylim(bottom=0)
     ax.set_xlabel('Redshift $z$')
     ax.set_ylabel(r'$(1/N)\,dN/dz$')
     ax.legend(frameon=False)
