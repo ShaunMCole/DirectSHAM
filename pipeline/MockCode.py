@@ -248,44 +248,97 @@ def make_all_columns_contiguous(tab):
     return tab
 
 # Parallel routine to read all Uchuu subhalo files
-def read_halolist_parallel(file_paths, randseed, columns, min_logMvir=10.4, min_Vpeak=0.0, lbox=2000.0, frac_box=0.8, xobs=0.0, yobs=0.0, zobs=0.0):
+def read_halolist_parallel(file_paths, randseed, columns, min_logMvir=10.4, min_Vpeak=0.0, lbox=2000.0, frac_box=0.8, xobs=0.0, yobs=0.0, zobs=0.0, use_tmpfiles=False):
+    """
+    Read all Uchuu subhalo files in parallel and return an astropy Table.
 
+    use_tmpfiles : bool (default False)
+        If True, each worker writes its result to a temporary .npy file on
+        $SCRATCH rather than returning it through the multiprocessing pipe.
+        This avoids the pipe-buffer / OOM issues that occur for high-redshift
+        snapshots where the total data volume (~160 GB) exceeds what the pipe
+        and concatenation step can hold in RAM simultaneously.
+        The original pipe-based method (use_tmpfiles=False) is unchanged and
+        remains the default for the cut-sky pipeline.
+    """
     nfiles = len(file_paths)
 
     args = []
     for i, filename in enumerate(file_paths):
         args.append([filename,randseed*nfiles+i,columns,min_logMvir,min_Vpeak,lbox,frac_box,xobs,yobs,zobs])
         
-    
     print("Start method:", multiprocessing.get_start_method())
     ncpus= multiprocessing.cpu_count()
-    nworkers = min(nfiles,min(ncpus,32))
+    nworkers = min(nfiles,ncpus)
     print("ncpus=",ncpus,"nworkers",nworkers)
-    with multiprocessing.Pool(nworkers) as pool:
-        file_results = pool.starmap(read_halolist_file_reps, args)
-        
-    tot_bytes = 0
 
-    for d in file_results:
-        for v in d.values():
-            tot_bytes += v.nbytes
+    if use_tmpfiles:
+        # ------------------------------------------------------------------
+        # Temp-file method: each worker saves its result to $SCRATCH as a
+        # .npy file.  Only a short filename string is returned through the
+        # pipe, avoiding the OOM/deadlock that occurs when 100 workers each
+        # try to pipe ~1.5 GB of arrays back simultaneously.
+        # Results are then loaded and concatenated one file at a time so
+        # peak RAM is only ~2x one file's data rather than all 100 at once.
+        # ------------------------------------------------------------------
+        import tempfile
 
-    print(f"All file_results = {tot_bytes/1024**3:.1f} GB")
+        tmpdir = tempfile.mkdtemp(dir=os.environ.get('SCRATCH', '/tmp'))
+        print(f"use_tmpfiles=True  tmpdir: {tmpdir}")
 
+        def _worker_save(packed):
+            idx, arg = packed
+            result = read_halolist_file_reps(*arg)
+            outfile = os.path.join(tmpdir, f'tmp_{idx:04d}.npy')
+            np.save(outfile, result)
+            return outfile
 
-    # concatenate across files without doubling memory usage
-    results = {}
-    cols = list(file_results[0].keys())
-    for col in cols:
+        packed_args = list(enumerate(args))
+        with multiprocessing.Pool(nworkers) as pool:
+            tmpfiles = pool.map(_worker_save, packed_args)
 
-        results[col] = np.concatenate([x[col] for x in file_results])
+        # Concatenate sequentially — only one file's data in RAM at a time
+        results = {}
+        tot_bytes = 0
+        for tmpfile in sorted(tmpfiles):
+            d = np.load(tmpfile, allow_pickle=True).item()
+            for k, v in d.items():
+                tot_bytes += v.nbytes
+                if k in results:
+                    results[k] = np.concatenate([results[k], v])
+                else:
+                    results[k] = v.copy()
+            del d
+            os.remove(tmpfile)
+            gc.collect()
+        os.rmdir(tmpdir)
+        print(f"All file_results = {tot_bytes/1024**3:.1f} GB")
 
-        # immediately release this column from file_results
-        for x in file_results:
-            del x[col]
-    #free up memory        
-    del file_results
-    gc.collect()
+    else:
+        # ------------------------------------------------------------------
+        # Original pipe-based method (default).  Works well for low-z
+        # snapshots where total data volume is manageable.
+        # ------------------------------------------------------------------
+        with multiprocessing.Pool(nworkers) as pool:
+            file_results = pool.starmap(read_halolist_file_reps, args)
+            
+        tot_bytes = 0
+        for d in file_results:
+            for v in d.values():
+                tot_bytes += v.nbytes
+        print(f"All file_results = {tot_bytes/1024**3:.1f} GB")
+
+        # concatenate across files without doubling memory usage
+        results = {}
+        cols = list(file_results[0].keys())
+        for col in cols:
+            results[col] = np.concatenate([x[col] for x in file_results])
+            # immediately release this column from file_results
+            for x in file_results:
+                del x[col]
+        #free up memory        
+        del file_results
+        gc.collect()
 
     return Table(results)
 

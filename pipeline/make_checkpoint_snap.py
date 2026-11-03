@@ -282,6 +282,7 @@ def main():
         xobs=xobs,
         yobs=yobs,
         zobs=zobs,
+        use_tmpfiles=True,
     )
     logger.info(f'Read {len(subhalos):,} subhaloes in {time.time()-t0:.1f}s')
 
