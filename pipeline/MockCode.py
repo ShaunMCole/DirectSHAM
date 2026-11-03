@@ -247,6 +247,18 @@ def make_all_columns_contiguous(tab):
         tab[name] = arr_contig
     return tab
 
+# Module-level worker for use_tmpfiles mode of read_halolist_parallel.
+# Must be at module level so multiprocessing can pickle it.
+_tmpfiles_dir = None   # set by read_halolist_parallel before spawning pool
+
+def _worker_save(packed):
+    idx, arg = packed
+    result = read_halolist_file_reps(*arg)
+    outfile = os.path.join(_tmpfiles_dir, f'tmp_{idx:04d}.npy')
+    np.save(outfile, result)
+    return outfile
+
+
 # Parallel routine to read all Uchuu subhalo files
 def read_halolist_parallel(file_paths, randseed, columns, min_logMvir=10.4, min_Vpeak=0.0, lbox=2000.0, frac_box=0.8, xobs=0.0, yobs=0.0, zobs=0.0, use_tmpfiles=False):
     """
@@ -282,16 +294,11 @@ def read_halolist_parallel(file_paths, randseed, columns, min_logMvir=10.4, min_
         # peak RAM is only ~2x one file's data rather than all 100 at once.
         # ------------------------------------------------------------------
         import tempfile
+        global _tmpfiles_dir
 
         tmpdir = tempfile.mkdtemp(dir=os.environ.get('SCRATCH', '/tmp'))
+        _tmpfiles_dir = tmpdir   # make visible to module-level _worker_save
         print(f"use_tmpfiles=True  tmpdir: {tmpdir}")
-
-        def _worker_save(packed):
-            idx, arg = packed
-            result = read_halolist_file_reps(*arg)
-            outfile = os.path.join(tmpdir, f'tmp_{idx:04d}.npy')
-            np.save(outfile, result)
-            return outfile
 
         packed_args = list(enumerate(args))
         with multiprocessing.Pool(nworkers) as pool:
