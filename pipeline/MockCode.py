@@ -247,31 +247,31 @@ def make_all_columns_contiguous(tab):
         tab[name] = arr_contig
     return tab
 
-# Module-level worker for use_tmpfiles mode of read_halolist_parallel.
-# Must be at module level so multiprocessing can pickle it.
-_tmpfiles_dir = None   # set by read_halolist_parallel before spawning pool
-
-def _worker_save(packed):
-    idx, arg = packed
-    result = read_halolist_file_reps(*arg)
-    outfile = os.path.join(_tmpfiles_dir, f'tmp_{idx:04d}.npy')
-    np.save(outfile, result)
-    return outfile
-
-
 # Parallel routine to read all Uchuu subhalo files
-def read_halolist_parallel(file_paths, randseed, columns, min_logMvir=10.4, min_Vpeak=0.0, lbox=2000.0, frac_box=0.8, xobs=0.0, yobs=0.0, zobs=0.0, use_tmpfiles=False):
+def read_halolist_parallel(file_paths, randseed, columns, min_logMvir=10.4, min_Vpeak=0.0, lbox=2000.0, frac_box=0.8, xobs=0.0, yobs=0.0, zobs=0.0, use_tmpfiles=False, tmpdir=None):
     """
-    Read all Uchuu subhalo files in parallel and return an astropy Table.
+    Read all Uchuu subhalo files and return an astropy Table.
 
     use_tmpfiles : bool (default False)
-        If True, each worker writes its result to a temporary .npy file on
-        $SCRATCH rather than returning it through the multiprocessing pipe.
-        This avoids the pipe-buffer / OOM issues that occur for high-redshift
-        snapshots where the total data volume (~160 GB) exceeds what the pipe
-        and concatenation step can hold in RAM simultaneously.
-        The original pipe-based method (use_tmpfiles=False) is unchanged and
-        remains the default for the cut-sky pipeline.
+        If False (default): original pipe-based parallel method using
+        pool.starmap.  Fast and works well for low-z snapshots where
+        total data volume is manageable (~50-100 GB).
+
+        If True: sequential checkpointed method.  Each file is read one
+        at a time and its result written to a .npy file in tmpdir.
+        Already-written files are skipped, so the run is restartable if
+        it times out.  Slower (no parallelism during the read) but
+        reliable for high-z snapshots (snap 40-43) where the parallel
+        pool deadlocks due to the large data volume (~160 GB).
+
+    tmpdir : str or None
+        Directory for .npy checkpoint files when use_tmpfiles=True.
+        Should be on $SCRATCH for best performance.  If None, a
+        temporary directory is created automatically (not restartable).
+        Pass a fixed path (e.g. '$SCRATCH/uchuu_snap043_tmp') to enable
+        restart after timeout: existing .npy files are skipped.
+        The directory is NOT deleted after completion so that reruns
+        can reuse it — clean it up manually once the checkpoint is done.
     """
     nfiles = len(file_paths)
 
@@ -286,29 +286,41 @@ def read_halolist_parallel(file_paths, randseed, columns, min_logMvir=10.4, min_
 
     if use_tmpfiles:
         # ------------------------------------------------------------------
-        # Temp-file method: each worker saves its result to $SCRATCH as a
-        # .npy file.  Only a short filename string is returned through the
-        # pipe, avoiding the OOM/deadlock that occurs when 100 workers each
-        # try to pipe ~1.5 GB of arrays back simultaneously.
-        # Results are then loaded and concatenated one file at a time so
-        # peak RAM is only ~2x one file's data rather than all 100 at once.
+        # Sequential checkpointed method.
+        # Each halo file is read one at a time and saved to a .npy file.
+        # If tmpdir already contains output from a previous (timed-out)
+        # run, those files are reused and the corresponding reads skipped.
+        # Concatenation is also sequential so peak RAM is ~2x one file.
         # ------------------------------------------------------------------
         import tempfile
-        global _tmpfiles_dir
 
-        tmpdir = tempfile.mkdtemp(dir=os.environ.get('SCRATCH', '/tmp'))
-        _tmpfiles_dir = tmpdir   # make visible to module-level _worker_save
-        print(f"use_tmpfiles=True  tmpdir: {tmpdir}")
+        if tmpdir is None:
+            tmpdir = tempfile.mkdtemp(dir=os.environ.get('SCRATCH', '/tmp'))
+            print(f"use_tmpfiles=True  tmpdir (auto): {tmpdir}")
+        else:
+            os.makedirs(tmpdir, exist_ok=True)
+            print(f"use_tmpfiles=True  tmpdir (fixed): {tmpdir}")
 
-        packed_args = list(enumerate(args))
-        with multiprocessing.Pool(nworkers) as pool:
-            tmpfiles = pool.map(_worker_save, packed_args)
+        # Read each file sequentially, skipping those already on disk
+        outfiles = []
+        for i, arg in enumerate(args):
+            outfile = os.path.join(tmpdir, f'tmp_{i:04d}.npy')
+            outfiles.append(outfile)
+            if os.path.exists(outfile):
+                print(f"  [{i+1}/{nfiles}] Skipping (cached): {os.path.basename(arg[0])}")
+                continue
+            print(f"  [{i+1}/{nfiles}] Reading: {os.path.basename(arg[0])}", flush=True)
+            result = read_halolist_file_reps(*arg)
+            np.save(outfile, result)
+            del result
+            gc.collect()
 
         # Concatenate sequentially — only one file's data in RAM at a time
+        print("All files read. Concatenating...")
         results = {}
         tot_bytes = 0
-        for tmpfile in sorted(tmpfiles):
-            d = np.load(tmpfile, allow_pickle=True).item()
+        for outfile in outfiles:
+            d = np.load(outfile, allow_pickle=True).item()
             for k, v in d.items():
                 tot_bytes += v.nbytes
                 if k in results:
@@ -316,10 +328,9 @@ def read_halolist_parallel(file_paths, randseed, columns, min_logMvir=10.4, min_
                 else:
                     results[k] = v.copy()
             del d
-            os.remove(tmpfile)
             gc.collect()
-        os.rmdir(tmpdir)
         print(f"All file_results = {tot_bytes/1024**3:.1f} GB")
+        print(f"Checkpoint files retained in {tmpdir} — delete manually when done.")
 
     else:
         # ------------------------------------------------------------------

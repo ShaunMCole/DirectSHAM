@@ -5,67 +5,66 @@ Read one Uchuu snapshot, sort subhaloes by scattered Vpeak, compute
 FracZpeak, apply the distance-dependent trimming mask, and write the
 checkpoint FITS file to the lightcone model directory.
 
-This is a lightcone-only companion to make_checkpoint.py.
-The cut-sky pipeline is untouched.
+Lightcone-only companion to make_checkpoint.py. Cut-sky pipeline untouched.
 
 Key differences from make_checkpoint.py
 ----------------------------------------
-* --snapshot argument selects which Uchuu snapshot (and hence redshift)
-  to process.  The halo directory is resolved via UCHUU_HALODIR_TEMPLATE.
-* obs_seed is fixed to 0 (DEFAULT_OBS_SEED) so that all snapshots share
-  the same observer position.  Different observers per snapshot would
-  corrupt the lightcone geometry.
-* Output goes to the lightcone model directory rather than the cut-sky
-  model directory.
+* --snapshot selects the Uchuu snapshot.  Halo directory resolved via
+  UCHUU_HALODIR_TEMPLATE.
+* obs_seed is fixed to 0 (box centre observer, no rotation).  All six
+  snapshots must share the same observer position or the lightcone
+  geometry is corrupted.
+* Output goes to the lightcone model directory.
 
 Usage
 -----
-Run on an exclusive SLURM node (same requirements as make_checkpoint.py):
+Run on an exclusive SLURM node (~30-60 min per snapshot):
 
-    python make_checkpoint_snap.py --snapshot 47 --reg NS \
-        --sig_lgv_ref 0.18 --sig_lgv_slope 0.30 \
-        --f_colour 0.00
+    python make_checkpoint_snap.py --snapshot 47 --reg NS \\
+        --sig_lgv_ref 0.18 --sig_lgv_slope 0.30
 
-The --reg NS option writes both N and S checkpoint files in one Uchuu
-read (recommended to save I/O time).
+--reg NS writes both N and S in one Uchuu read (recommended).
 """
 
 import multiprocessing
-multiprocessing.set_start_method('fork', force=True)  # must be before other imports
+multiprocessing.set_start_method('fork', force=True)
 
 import argparse
+import gc
 import glob
-import logging
-import os
 import sys
 import time
 from pathlib import Path
 
 import numpy as np
 from astropy.table import Table
+from scipy.interpolate import interp1d
+import fitsio
+from desimodel.footprint import is_point_in_desi
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import MockCode as mc
 from pipeline_utils import make_lightcone_paths, write_fits_meta, setup_logging
 from config import (
-    cosmo_uchuu,
-    UCHUU_HALODIR_TEMPLATE,
-    UCHUU_COLUMNS,
-    MIN_LOG_MVIR,
-    TILES_FILE,
-    LBOX,
-    FRAC_BOX,
-    MIN_VPEAK,
-    N_NEIGH_VPEAK,
+    DEFAULT_OBS_SEED,
     DEFAULT_SIG_LGV_REF,
     DEFAULT_SIG_LGV_SLOPE,
     DEFAULT_LGV_PIVOT,
     DEFAULT_F_COLOUR,
     DEFAULT_ALPHA,
-    DEFAULT_OBS_SEED,
     DEFAULT_SEED_FCOLOUR,
+    MIN_VPEAK,
+    N_NEIGH_VPEAK,
+    LBOX,
+    FRAC_BOX,
+    UCHUU_COLUMNS,
+    MIN_LOG_MVIR,
+    UCHUU_HALODIR_TEMPLATE,
+    TILES_FILE,
     NORTH_RA_MIN,
     NORTH_RA_MAX,
     NORTH_DEC_MIN,
+    cosmo_uchuu,
 )
 
 
@@ -73,10 +72,9 @@ def parse_args():
     p = argparse.ArgumentParser(
         description='Build lightcone checkpoint for one Uchuu snapshot.'
     )
-    p.add_argument('--snapshot',      type=int,   required=True,
-                   help='Uchuu snapshot index (e.g. 45 for z=0.19).')
+    p.add_argument('--snapshot',      type=int,   required=True)
     p.add_argument('--reg',           type=str,   default='NS',
-                   help='Region(s): N, S, or NS (default NS).')
+                   choices=['N', 'S', 'NS'])
     p.add_argument('--sig_lgv_ref',   type=float, default=DEFAULT_SIG_LGV_REF)
     p.add_argument('--sig_lgv_slope', type=float, default=DEFAULT_SIG_LGV_SLOPE)
     p.add_argument('--lgv_pivot',     type=float, default=DEFAULT_LGV_PIVOT)
@@ -84,122 +82,81 @@ def parse_args():
     p.add_argument('--seed_fcolour',  type=int,   default=DEFAULT_SEED_FCOLOUR)
     p.add_argument('--n_neigh_vpeak', type=int,   default=N_NEIGH_VPEAK)
     p.add_argument('--min_vpeak',     type=float, default=MIN_VPEAK)
+    p.add_argument('--plot',          action='store_true')
     return p.parse_args()
 
 
-def get_observer_position(obs_seed=DEFAULT_OBS_SEED, lbox=LBOX):
-    """Same logic as cut-sky pipeline: seed + offset 58."""
-    offset = 58
-    rng  = np.random.default_rng(obs_seed + offset)
-    xobs = lbox * rng.random()
-    yobs = lbox * rng.random()
-    zobs = lbox * rng.random()
+def observer_position(log):
+    """obs_seed=0: observer at box centre (matches make_checkpoint.py)."""
+    xobs = yobs = zobs = LBOX / 2.0
+    log.info(f'Observer at box centre: ({xobs}, {yobs}, {zobs})')
     return xobs, yobs, zobs
 
 
-def compute_subhalo_redshifts(subhalos):
+def add_sky_coords(subhalos, log):
     """
-    Compute 3-D comoving distance and invert to cosmological redshift
-    using the Uchuu cosmology (cosmo_uchuu from config.py).
+    Compute RA, DEC, dist, Zu (cosmological redshift), Zobs, conc.
+    obs_seed=0: no rotation applied (identity, same as make_checkpoint.py).
+    vx/vy/vz removed after computing vr_c; Rvir/rs replaced by conc.
     """
-    dist = np.sqrt(
-        subhalos['x']**2 + subhalos['y']**2 + subhalos['z']**2
-    ).astype(np.float32)
+    t0 = time.time()
+    log.info('obs_seed=0: no rotation applied.')
+
+    dist = np.sqrt(subhalos['x']**2 + subhalos['y']**2 + subhalos['z']**2)
     subhalos['dist'] = dist
+    subhalos['DEC']  = np.degrees(np.arcsin(subhalos['z'] / dist))
+    subhalos['RA']   = np.degrees(np.arctan2(subhalos['y'], subhalos['x'])) % 360.0
 
-    # Invert d_comoving(z) via interpolation on a fine grid
-    z_grid = np.linspace(0.0, 0.65, 10_000)
-    d_grid = cosmo_uchuu.comoving_distance(z_grid).value  # Mpc/h (H0=100)
-    zu = np.interp(dist, d_grid, z_grid).astype(np.float32)
-    subhalos['Zu'] = zu
+    c_light = 299792.458
+    vr_c = (
+        subhalos['x'] * subhalos['vx'] +
+        subhalos['y'] * subhalos['vy'] +
+        subhalos['z'] * subhalos['vz']
+    ) / (c_light * dist)
+
+    for col in ('vx', 'vy', 'vz'):
+        subhalos.remove_column(col)
+    gc.collect()
+
+    subhalos['conc'] = subhalos['Rvir'] / subhalos['rs']
+    subhalos.remove_column('Rvir')
+    subhalos.remove_column('rs')
+    gc.collect()
+
+    z_grid  = np.linspace(0.0, 1.0, 10000)
+    Dc_grid = cosmo_uchuu.comoving_distance(z_grid).value
+    z_of_Dc = interp1d(Dc_grid, z_grid, bounds_error=False,
+                       fill_value='extrapolate')
+    subhalos['Zu']   = z_of_Dc(dist).astype(np.float32)
+    subhalos['Zobs'] = ((1.0 + subhalos['Zu']) * (1.0 + vr_c) - 1.0
+                        ).astype(np.float32)
+    del z_grid, Dc_grid, z_of_Dc, vr_c, dist
+
+    log.info(f'Sky coords + redshifts done in {time.time()-t0:.1f}s')
     return subhalos
 
 
-def add_sky_coords_and_velocities(subhalos, obs_seed=DEFAULT_OBS_SEED):
-    """
-    Add RA, Dec, and line-of-sight peculiar velocity.
-    Uses a random Euler rotation with the same seed as the cut-sky pipeline.
-    For obs_seed=0 the rotation is the identity (phi=theta=psi=0).
-    """
-    phi, theta, psi = mc.random_euler_angles(seed=obs_seed)
-    R = mc.euler_rotation_matrix(phi, theta, psi)
-
-    xyz = np.stack(
-        [subhalos['x'], subhalos['y'], subhalos['z']], axis=1
+def apply_sky_mask(subhalos, reg, log):
+    t0 = time.time()
+    log.info(f'Applying DESI DR2 sky mask for region {reg}')
+    tiles   = fitsio.read(str(TILES_FILE))
+    in_desi = is_point_in_desi(tiles, subhalos['RA'], subhalos['DEC'])
+    north   = (
+        (subhalos['RA']  > NORTH_RA_MIN) &
+        (subhalos['RA']  < NORTH_RA_MAX) &
+        (subhalos['DEC'] > NORTH_DEC_MIN)
     )
-    xyz_rot = xyz @ R.T
-
-    dist = subhalos['dist']
-    safe = dist > 0
-
-    ra  = np.zeros(len(subhalos), dtype=np.float32)
-    dec = np.zeros(len(subhalos), dtype=np.float32)
-    ra[safe]  = (np.degrees(
-        np.arctan2(xyz_rot[safe, 1], xyz_rot[safe, 0])
-    ) % 360.0).astype(np.float32)
-    dec[safe] = np.degrees(
-        np.arcsin(np.clip(xyz_rot[safe, 2] / dist[safe], -1.0, 1.0))
-    ).astype(np.float32)
-
-    subhalos['RA']  = ra
-    subhalos['DEC'] = dec
-
-    # Line-of-sight peculiar velocity
-    v_xyz = np.stack(
-        [subhalos['vx'], subhalos['vy'], subhalos['vz']], axis=1
-    ) @ R.T
-    los_hat = np.zeros_like(xyz_rot)
-    los_hat[safe] = xyz_rot[safe] / dist[safe, None]
-    v_los = np.einsum('ij,ij->i', v_xyz, los_hat).astype(np.float32)
-    subhalos['Vlos'] = v_los
-
-    return subhalos
+    mask   = in_desi & north if reg == 'N' else in_desi & ~north
+    result = subhalos[mask]
+    log.info(f'After mask: {len(result):,} subhalos ({time.time()-t0:.1f}s)')
+    return result
 
 
-def mask_to_footprint(subhalos, reg):
-    """Apply DESI DR2 footprint mask for region reg (N or S)."""
-    from desimodel.footprint import is_point_in_desi
-    import fitsio
-    tiles = fitsio.read(str(TILES_FILE))
-    ra    = subhalos['RA']
-    dec   = subhalos['DEC']
+def write_checkpoint(subhalos_reg, reg, snapshot, redshift, args, log):
+    if 'id' in subhalos_reg.colnames:
+        subhalos_reg.rename_column('id', 'ID')
 
-    in_desi = is_point_in_desi(tiles, ra, dec)
-    is_north = (ra > NORTH_RA_MIN) & (ra < NORTH_RA_MAX) & (dec > NORTH_DEC_MIN)
-
-    if reg == 'N':
-        mask = in_desi & is_north
-    elif reg == 'S':
-        mask = in_desi & ~is_north
-    else:
-        raise ValueError(f'Unknown reg: {reg}')
-
-    return subhalos[mask]
-
-
-def process_region(subhalos_full, reg, snapshot, redshift_snap, args, logger):
-    """Mask → pre-sort → write checkpoint for one region."""
-    logger.info(f'[snap{snapshot:02d}/{reg}] Masking to footprint...')
-    subhalos = mask_to_footprint(subhalos_full, reg)
-    logger.info(f'[snap{snapshot:02d}/{reg}] {len(subhalos):,} subhaloes after footprint mask.')
-
-    logger.info(f'[snap{snapshot:02d}/{reg}] Pre-sorting (scatter + FracZpeak)...')
-    subhalos = mc.pre_sort_subhalos(
-        subhalos,
-        N_neigh=args.n_neigh_vpeak,
-        sig_lgv_ref=args.sig_lgv_ref,
-        sig_lgv_slope=args.sig_lgv_slope,
-        lgv_pivot=args.lgv_pivot,
-        f_colour=args.f_colour,
-        seed_fcolour=args.seed_fcolour,
-    )
-
-    # Apply distance-dependent trimming (keep=True rows only)
-    keep_mask = subhalos['keep']
-    subhalos  = mc.filter_table_staged(subhalos, keep_mask)
-    logger.info(f'[snap{snapshot:02d}/{reg}] {len(subhalos):,} subhaloes after Vpeak trim.')
-
-    outpath = make_lightcone_paths(
+    out_path = make_lightcone_paths(
         sig_lgv_ref=args.sig_lgv_ref,
         sig_lgv_slope=args.sig_lgv_slope,
         f_colour=args.f_colour,
@@ -207,10 +164,12 @@ def process_region(subhalos_full, reg, snapshot, redshift_snap, args, logger):
         snapshot=snapshot,
         reg=reg,
     )['subhalo_fits']
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     meta = {
+        'STAGE':     'make_checkpoint_snap',
         'SNAP':      snapshot,
-        'ZSNAP':     redshift_snap,
+        'ZSNAP':     redshift,
         'REG':       reg,
         'OBS_SEED':  DEFAULT_OBS_SEED,
         'SIGLGVREF': args.sig_lgv_ref,
@@ -218,30 +177,31 @@ def process_region(subhalos_full, reg, snapshot, redshift_snap, args, logger):
         'LGVPIVOT':  args.lgv_pivot,
         'FCOLOUR':   args.f_colour,
         'SEEDFC':    args.seed_fcolour,
-        'NNEIGHVPK': args.n_neigh_vpeak,
-        'MINVPEAK':  args.min_vpeak,
+        'MIN_VPEAK': args.min_vpeak,
+        'NNVPEAK':   args.n_neigh_vpeak,
+        'LBOX':      LBOX,
+        'FRAC_BOX':  FRAC_BOX,
     }
+    write_fits_meta(subhalos_reg.meta, meta)
 
-    logger.info(f'[snap{snapshot:02d}/{reg}] Writing checkpoint to {outpath}')
-    subhalos.meta.update(meta)
-    write_fits_meta(subhalos.meta, meta)   # attaches PIPE_VER, CREATED
-    subhalos.write(str(outpath), overwrite=True)
-    logger.info(f'[snap{snapshot:02d}/{reg}] Done. {len(subhalos):,} subhaloes written.')
+    t0 = time.time()
+    subhalos_reg.write(str(out_path), overwrite=True)
+    log.info(f'Written {len(subhalos_reg):,} subhalos in {time.time()-t0:.1f}s')
+    log.info(f'→ {out_path}')
 
 
 def main():
     args     = parse_args()
     snapshot = args.snapshot
-    regions  = list(args.reg)   # 'NS' → ['N','S']
+    regs     = ['N', 'S'] if args.reg == 'NS' else [args.reg]
 
     if snapshot not in mc.redshift_table:
         raise ValueError(
             f'Snapshot {snapshot} not in redshift_table. '
             f'Valid: {sorted(mc.redshift_table.keys())}'
         )
-    redshift_snap = mc.redshift_table[snapshot]
+    redshift = mc.redshift_table[snapshot]
 
-    # Create lightcone directory
     lc_paths      = make_lightcone_paths(
         sig_lgv_ref=args.sig_lgv_ref,
         sig_lgv_slope=args.sig_lgv_slope,
@@ -251,30 +211,34 @@ def main():
     lightcone_dir = lc_paths['lightcone_dir']
     lightcone_dir.mkdir(parents=True, exist_ok=True)
 
-    logger = setup_logging(
+    log = setup_logging(
         f'make_checkpoint_snap{snapshot:02d}',
         log_dir=lightcone_dir / 'logs',
     )
-    logger.info(f'Snapshot {snapshot}  z={redshift_snap}  regions={regions}')
-    logger.info(f'Lightcone dir: {lightcone_dir}')
+    log.info(f'Snapshot {snapshot}  z={redshift}  regions={regs}')
+    log.info(f'Lightcone dir: {lightcone_dir}')
 
-    # Observer position — always obs_seed=0 for lightcones
-    xobs, yobs, zobs = get_observer_position()
-    logger.info(f'Observer (seed=0): ({xobs:.2f}, {yobs:.2f}, {zobs:.2f}) Mpc/h')
+    xobs, yobs, zobs = observer_position(log)
 
-    # Locate halo files
-    halodir    = UCHUU_HALODIR_TEMPLATE.format(index=snapshot)
-    file_paths = sorted(glob.glob(os.path.join(halodir, 'halolist_*.h5')))
-    if not file_paths:
-        raise FileNotFoundError(f'No hdf5 files in {halodir}')
-    logger.info(f'Reading {len(file_paths)} halo files from {halodir}')
+    halodir   = UCHUU_HALODIR_TEMPLATE.format(index=snapshot)
+    halofiles = sorted(glob.glob(f'{halodir}/halolist_*.h5'))
+    if not halofiles:
+        raise FileNotFoundError(f'No halo files found in {halodir}')
+    log.info(f'Found {len(halofiles)} halo files')
 
-    # Read all halo files in parallel
+    # Use sequential checkpointed reading for lightcone snapshots to avoid
+    # the pipe deadlock / OOM that occurs with the parallel pool for high-z
+    # snapshots.  A fixed tmpdir per snapshot allows restart after timeout:
+    # files already written are skipped automatically.
+    scratch = os.environ.get('SCRATCH', '/tmp')
+    read_tmpdir = os.path.join(scratch, f'uchuu_snap{snapshot:03d}_tmp')
+    log.info(f'Halo read tmpdir: {read_tmpdir}')
+
     t0 = time.time()
     subhalos = mc.read_halolist_parallel(
-        file_paths,
+        halofiles,
         randseed=0,
-        columns=list(UCHUU_COLUMNS),
+        columns=UCHUU_COLUMNS,
         min_logMvir=MIN_LOG_MVIR,
         min_Vpeak=args.min_vpeak,
         lbox=LBOX,
@@ -283,21 +247,39 @@ def main():
         yobs=yobs,
         zobs=zobs,
         use_tmpfiles=True,
+        tmpdir=read_tmpdir,
     )
-    logger.info(f'Read {len(subhalos):,} subhaloes in {time.time()-t0:.1f}s')
+    log.info(f'Read {len(subhalos):,} subhalos in {time.time()-t0:.1f}s')
 
-    # Rename id → ID for consistency with cut-sky pipeline
-    subhalos.rename_column('id', 'ID')
+    subhalos = add_sky_coords(subhalos, log)
 
-    # Compute distances, redshifts, sky coords and velocities
-    subhalos = compute_subhalo_redshifts(subhalos)
-    subhalos = add_sky_coords_and_velocities(subhalos, obs_seed=DEFAULT_OBS_SEED)
+    subhalos = mc.make_all_columns_contiguous(subhalos)
 
-    # Process each region
-    for reg in regions:
-        process_region(subhalos, reg, snapshot, redshift_snap, args, logger)
+    subhalos = mc.pre_sort_subhalos(
+        subhalos,
+        N_neigh=args.n_neigh_vpeak,
+        sig_lgv_ref=args.sig_lgv_ref,
+        sig_lgv_slope=args.sig_lgv_slope,
+        lgv_pivot=args.lgv_pivot,
+        f_colour=args.f_colour,
+        seed_fcolour=args.seed_fcolour,
+        plot=args.plot,
+    )
 
-    logger.info('make_checkpoint_snap.py complete.')
+    subhalos = mc.filter_table_staged(
+        subhalos, subhalos['keep'], drop_mask=True, mask_name='keep'
+    )
+    gc.collect()
+    log.info(f'After distance trim: {len(subhalos):,} subhalos')
+
+    for reg in regs:
+        log.info(f'=== Region {reg} ===')
+        subhalos_reg = apply_sky_mask(subhalos, reg, log)
+        write_checkpoint(subhalos_reg, reg, snapshot, redshift, args, log)
+        del subhalos_reg
+        gc.collect()
+
+    log.info('make_checkpoint_snap.py complete.')
 
 
 if __name__ == '__main__':
