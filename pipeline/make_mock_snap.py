@@ -7,13 +7,16 @@ Lightcone-only companion to make_mock.py. Cut-sky pipeline untouched.
 Key differences from make_mock.py
 -----------------------------------
 * --snapshot selects the checkpoint from the lightcone directory.
+* Uses the formock random catalogue (not fordata randoms) so that fsky
+  and NMULT are consistent with the mock footprint.  fsky and nmult are
+  read directly from the formock randoms file metadata.
 * Full redshift range is matched; shell slicing done by make_lightcone.py.
 * Zr is NOT written (debug-only column).
-* Zobs computed as (1+Zu)*(1+vr_c)-1, consistent with make_checkpoint_snap.py.
+* Zobs computed as (1+Zu)*(1+Vlos/c)-1 when Zobs not in checkpoint.
 * obs_seed always 0.
 
-Usage (login node)
--------------------------------------------
+Usage (login node — run from ~/ShaunColeDESI for K-correction data files)
+--------------------------------------------------------------------------
     python make_mock_snap.py --snapshot 47 --reg N \\
         --sig_lgv_ref 0.18 --sig_lgv_slope 0.30
 """
@@ -105,7 +108,10 @@ def main():
         f_colour=args.f_colour,
         alpha=args.alpha,
     )
-    random_path = cs_paths[f'fordata_ran_{reg}']
+    # Use the formock random catalogue so that fsky and NMULT are consistent
+    # with the mock footprint.  The fordata randoms cover the data footprint
+    # and have a different fsky, which causes incorrect density ratios in SHAM.
+    random_path = cs_paths[f'formock_ran_{reg}']
 
     diag_dir = lightcone_dir / f'diagnostics_snap{snapshot:02d}_{reg}'
     diag_dir.mkdir(parents=True, exist_ok=True)
@@ -126,14 +132,21 @@ def main():
     subhalos = Table.read(str(subhalo_path))
     log.info(f'  {len(subhalos):,} subhalos in {time.time()-t0:.1f}s')
 
-    log.info('Reading fordata randoms...')
+    log.info('Reading formock randoms...')
     t0 = time.time()
     ran = Table.read(str(random_path))
+    ran['ID'] = np.arange(len(ran), dtype=np.int64)
     log.info(f'  {len(ran):,} randoms in {time.time()-t0:.1f}s')
 
     # ── Survey parameters ─────────────────────────────────────────────────────
+    # Read fsky and nmult from the formock randoms metadata — these are the
+    # values used when make_mock.py generated the formock randoms and are
+    # consistent with the mock footprint sky area.
+    fsky     = ran.meta['FSKY']
+    nmult    = ran.meta['NMULT']
+    log.info(f'fsky={fsky:.6f}  nmult={nmult:.4f}  (from formock randoms metadata)')
+
     Sel      = ca.selection(reg)
-    fsky     = Sel['fsky']
     zmin_cat = Sel['zmin']
     zmax_cat = Sel['zmax']
     z_bins   = np.linspace(zmin_cat, zmax_cat, args.nzbins + 1)
@@ -148,7 +161,7 @@ def main():
         lbox=LBOX,
         rsphere=rsphere,
         fsky=fsky,
-        nmult=args.nclones,
+        nmult=nmult,           # from formock randoms metadata
         z_bins=z_bins,
         DeltaZ=args.deltaz,
         reg=reg,
@@ -177,12 +190,19 @@ def main():
     mock['RA']     = subhalos['RA'][sub_rows]
     mock['DEC']    = subhalos['DEC'][sub_rows]
     mock['Z']      = subhalos['Zu'][sub_rows]      # real-space cosmological redshift
-    mock['Zobs']   = subhalos['Zobs'][sub_rows]    # (1+Zu)*(1+vr_c)-1, from checkpoint
     mock['Vpeak']  = subhalos['Vpeak'][sub_rows]
     mock['Mvir']   = subhalos['Mvir_all'][sub_rows]
-    mock['conc']   = subhalos['conc'][sub_rows]
     mock['sub_ID'] = subhalos['ID'][sub_rows]
 
+    if 'Zobs' in subhalos.colnames:
+        mock['Zobs'] = subhalos['Zobs'][sub_rows] # (1+Zu)*(1+vr_c)-1, from checkpoint
+    else:
+        # Compute from Zu and Vlos (km/s)
+        C_KMS = 299792.458
+        zu   = subhalos['Zu'][sub_rows]
+        vlos = subhalos['Vlos'][sub_rows]
+        mock['Zobs'] = ((1.0 + zu) * (1.0 + vlos / C_KMS) - 1.0).astype(np.float32)
+    
     # All galaxy properties from matched random (Zr excluded — debug only)
     skip_ran_cols = {'ID', 'Z', 'RA', 'DEC'}
     for col in ran.colnames:
@@ -212,9 +232,10 @@ def main():
         'FCOLOUR':   args.f_colour,
         'ALPHA':     args.alpha,
         'N_NEIGH':   args.n_neigh,
+        'FSKY':      fsky,
+        'NMULT':     nmult,
+        'ZINSUFFY':  float(z_insufficient) if z_insufficient is not None else -1.0,
     }
-    if z_insufficient is not None:
-        meta['ZINSUFFY'] = z_insufficient
 
     write_fits_meta(mock.meta, meta)
     log.info(f'Writing {len(mock):,} rows to {shell_mock_path}')
