@@ -112,6 +112,12 @@ def parse_args():
     p.add_argument("--sig_lgv_slope", type=float, default=DEFAULT_SIG_LGV_SLOPE)
     p.add_argument("--f_colour", type=float, default=DEFAULT_F_COLOUR)
     p.add_argument("--alpha", type=float, default=DEFAULT_ALPHA)
+    # SF/Q split (optional — if omitted, no sSFR cut applied)
+    p.add_argument("--sfq", choices=["sf", "passive"], default=None,
+                   help="Split by CIGALE sSFR: 'sf' (log sSFR >= -11) or "
+                        "'passive' (log sSFR < -11). Requires LOGM and LOGSFR.")
+    p.add_argument("--logssfr_cut", type=float, default=-11.0,
+                   help="log10 sSFR cut for SF/passive split (default: -11.0)")
     # Regions
     p.add_argument("--regions", nargs="+", default=["NGC", "SGC"],
                    choices=["NGC", "SGC"])
@@ -127,7 +133,7 @@ def parse_args():
 # =============================================================================
 
 def apply_cuts(infile, outfile, sample_type, cut_value, zmin, zmax,
-               is_mock, log):
+               is_mock, log, sfq=None, logssfr_cut=-11.0):
     """
     Apply redshift and sample selection cuts; write trimmed catalogue.
     For mocks: rename Zobs→Z for xirunpc.py.
@@ -143,16 +149,29 @@ def apply_cuts(infile, outfile, sample_type, cut_value, zmin, zmax,
     z_col = "Zobs" if ("Zobs" in cat.colnames and is_mock) else "Z"
     mask  = (cat[z_col] >= zmin) & (cat[z_col] <= zmax)
 
-    # Primary selection cut — only apply to galaxy catalogues, not randoms
+    # Primary selection cut
     if col in cat.colnames:
         if cfg["sense"] == "lt":
             mask &= cat[col] < cut_value
         else:
             mask &= cat[col] > cut_value
     else:
-        # Randoms carry the same stellar mass columns — apply the same cut
-        # so that the random catalogue matches the galaxy selection function
         log.info(f"  Column {col!r} not found — no selection cut applied")
+
+    # Secondary sSFR cut (SF/passive split) — applied to galaxies AND randoms
+    # since randoms are galaxy clones carrying LOGM and LOGSFR
+    if sfq is not None:
+        if "LOGM" in cat.colnames and "LOGSFR" in cat.colnames:
+            logm   = np.asarray(cat["LOGM"],   dtype=float)
+            logsfr = np.asarray(cat["LOGSFR"], dtype=float)
+            logssfr = logsfr - logm
+            if sfq == "sf":
+                mask &= logssfr >= logssfr_cut
+            else:  # passive
+                mask &= logssfr < logssfr_cut
+            log.info(f"  sSFR cut ({sfq}): log(sSFR) {'>='+str(logssfr_cut) if sfq=='sf' else '<'+str(logssfr_cut)}")
+        else:
+            log.warning("  LOGM or LOGSFR not found — sSFR cut not applied")
 
     cat_cut = cat[mask]
 
@@ -191,7 +210,8 @@ def main():
     is_mock   = (args.mode == "mock")
 
     log.info(f"mode={args.mode}  sample_type={args.sample_type}  "
-             f"cut={cut_value}  zmin={args.zmin}  zmax={args.zmax}")
+             f"cut={cut_value}  zmin={args.zmin}  zmax={args.zmax}"
+             + (f"  sfq={args.sfq}" if args.sfq else ""))
 
     lss_script = Path(args.lss_script) if args.lss_script else LSS_SCRIPT
     if not lss_script.exists():
@@ -204,7 +224,8 @@ def main():
                        f_colour=args.f_colour, alpha=args.alpha)
 
     # Output directory
-    sample_tag = f"{label}{cut_value}_z{args.zmin:.2f}-{args.zmax:.2f}"
+    sfq_suffix = f"_{args.sfq}" if args.sfq else ""
+    sample_tag = f"{label}{cut_value}_z{args.zmin:.2f}-{args.zmax:.2f}{sfq_suffix}"
     if args.outdir:
         outdir = Path(args.outdir)
     elif is_mock:
@@ -248,7 +269,8 @@ def main():
 
     for src, dst in pairs:
         apply_cuts(src, dst, args.sample_type, cut_value,
-                   args.zmin, args.zmax, is_mock, log)
+                   args.zmin, args.zmax, is_mock, log,
+                   sfq=args.sfq, logssfr_cut=args.logssfr_cut)
 
     # -------------------------------------------------------------------------
     # Step 2: Symlink parent catalogues (data mode only)

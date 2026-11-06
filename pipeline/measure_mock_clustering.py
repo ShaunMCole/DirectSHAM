@@ -106,6 +106,10 @@ def parse_args():
         "--lss_script", type=str, default=None,
         help=f"Path to xirunpc.py (default: {LSS_SCRIPT})",
     )
+    p.add_argument(
+        "--lightcone", action="store_true",
+        help="Measure clustering from lightcone mock files instead of cut-sky mocks.",
+    )
     return p.parse_args()
 
 
@@ -155,11 +159,13 @@ def apply_cuts(infile, outfile, mr_cut, zmin, zmax, log):
 def main():
     args = parse_args()
     log  = setup_logging("measure_mock_clustering")
+    lc_tag = "_lightcone" if args.lightcone else ""
     log.info(
         f"obs_seed={args.obs_seed}  sig_lgv_ref={args.sig_lgv_ref}  "
         f"sig_lgv_slope={args.sig_lgv_slope}  "
         f"mr_cut={args.mr_cut}  zmin={args.zmin}  zmax={args.zmax}  "
         f"regions={args.regions}"
+        + ("  [LIGHTCONE]" if args.lightcone else "")
     )
 
     lss_script = Path(args.lss_script) if args.lss_script else LSS_SCRIPT
@@ -175,8 +181,21 @@ def main():
                        sig_lgv_slope=args.sig_lgv_slope,
                        f_colour=args.f_colour, alpha=args.alpha)
 
+    # For lightcone mode, override mock paths to point at lightcone files.
+    # Formock randoms (NGC/SGC split) are shared with the cut-sky pipeline.
+    if args.lightcone:
+        from pipeline_utils import make_lightcone_paths
+        lc_paths = make_lightcone_paths(
+            sig_lgv_ref=args.sig_lgv_ref,
+            sig_lgv_slope=args.sig_lgv_slope,
+            f_colour=args.f_colour,
+            alpha=args.alpha,
+        )
+        paths["mock_NGC"] = lc_paths["mock_lightcone_NGC"]
+        paths["mock_SGC"] = lc_paths["mock_lightcone_SGC"]
+
     # Output directories.
-    sample_tag = f"Mr{args.mr_cut}_z{args.zmin:.2f}-{args.zmax:.2f}"
+    sample_tag = f"Mr{args.mr_cut}_z{args.zmin:.2f}-{args.zmax:.2f}{lc_tag}"
     if args.outdir:
         outdir = Path(args.outdir)
     else:

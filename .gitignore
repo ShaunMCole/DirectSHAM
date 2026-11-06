@@ -1,22 +1,38 @@
-# Large data files
+# Plot outputs
+*.pdf
+*.jpg
+*.jpeg
+*.png
+*.eps
+*.svg
+
+# Python backup and cache files
+*.py~
+*.pyc
+__pycache__/
+*.pyo
+
+# Jupyter notebooks (optional — remove if you want to track these)
+# *.ipynb
+
+# FITS and numpy data files (large; not for version control)
 *.fits
 *.npy
-*.hdf5
-*.h5
+*.npz
 
-# Logs and checkpoints
-logs/
+# Log files
+*.txt
 *.log
-*.err
-*.out
-slurm-*.out
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-.ipynb_checkpoints/
+# Accidental shell fragment files
+done
+echo
+else
+fi
+f=*
 
-# Editor
-.vscode/
-*.swp
+# Editor and OS cruft
+.DS_Store
+*~
+\#*\#
+.#*

@@ -273,15 +273,15 @@ def main():
                 fmt = DATA_MARKERS[f'xi{ell}']
                 y    = s_d**2 * xi_dat[ell][good_dat]
                 yerr = s_d**2 * err_dat[ell][good_dat]
+                lbl = f'{colour.capitalize()} $\\xi_{ell}$'
                 if has_cov and np.any(err_dat[ell][good_dat] > 0):
                     h = ax.errorbar(s_d, y, yerr=yerr, fmt=fmt, color=c,
                                     ms=4, capsize=2, lw=0.8, zorder=10,
-                                    label=f'Data $\\xi_{ell}$ {colour}')
+                                    label=lbl)
                 else:
                     h, = ax.plot(s_d, y, fmt, color=c, ms=4, zorder=10,
-                                 label=f'Data $\\xi_{ell}$ {colour}')
-                if ell == 0:
-                    data_handles.append(h)
+                                 label=lbl)
+                data_handles.append(h)
 
         # --- Mocks ---
         legend_handles = []

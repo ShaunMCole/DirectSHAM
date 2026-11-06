@@ -84,6 +84,9 @@ def parse_args():
     p.add_argument('--outdir', type=str, default=None,
                    help='Output directory for figures. Defaults to '
                         'DATA_DIR/diagnostics/seed{obs_seed}_sig_lgv{ref}_{slope}_{date}/')
+    p.add_argument('--lightcone', action='store_true',
+                   help='Inspect the lightcone mock (mock_lightcone_N/S.fits) '
+                        'instead of the cut-sky mock (mock_N/S.fits).')
     return p.parse_args()
 
 
@@ -582,9 +585,11 @@ def main():
         plt.ion()
 
     log = setup_logging("inspect_mocks")
+    lc_tag = "_lightcone" if args.lightcone else ""
     log.info(f"reg={args.reg}  obs_seed={args.obs_seed}  "
              f"sig_lgv_ref={args.sig_lgv_ref}  sig_lgv_slope={args.sig_lgv_slope}  "
-             f"f_colour={args.f_colour}  alpha={args.alpha}")
+             f"f_colour={args.f_colour}  alpha={args.alpha}"
+             + ("  [LIGHTCONE]" if args.lightcone else ""))
 
     # Output directory.
     if args.outdir:
@@ -593,7 +598,7 @@ def main():
         tag    = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         outdir = (DATA_DIR / "diagnostics" /
                   f"{args.reg}_seed{args.obs_seed:03d}_sig_lgv{args.sig_lgv_ref:.2f}_{args.sig_lgv_slope:.2f}"
-                  f"_fc{args.f_colour:.2f}_al{args.alpha:.2f}_{tag}")
+                  f"_fc{args.f_colour:.2f}_al{args.alpha:.2f}{lc_tag}_{tag}")
     outdir.mkdir(parents=True, exist_ok=True)
     log.info(f"Output directory: {outdir}")
 
@@ -602,10 +607,23 @@ def main():
                        sig_lgv_ref=args.sig_lgv_ref, sig_lgv_slope=args.sig_lgv_slope,
                        f_colour=args.f_colour, alpha=args.alpha)
 
+    # For lightcone mode, override the mock path to point at the lightcone file.
+    from pipeline_utils import make_lightcone_paths
+    if args.lightcone:
+        lc_paths  = make_lightcone_paths(
+            sig_lgv_ref=args.sig_lgv_ref,
+            sig_lgv_slope=args.sig_lgv_slope,
+            f_colour=args.f_colour,
+            alpha=args.alpha,
+        )
+        mock_path = lc_paths['lightcone_dir'] / f"mock_lightcone_{args.reg}.fits"
+    else:
+        mock_path = paths[f"mock_{args.reg}"]
+
     # Load catalogues.
     import catalogue_analysis as ca
     log.info("=== Loading catalogues ===")
-    mock    = load_catalogue(paths[f"mock_{args.reg}"],       "Mock",            log)
+    mock    = load_catalogue(mock_path,                        "Mock",            log)
     ran     = load_catalogue(paths[f"formock_ran_{args.reg}"],"Formock randoms", log)
     ran_inp = load_catalogue(paths[f"fordata_ran_{args.reg}"],"Fordata randoms", log)
 
