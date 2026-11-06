@@ -192,6 +192,9 @@ def main():
     mock['Z']      = subhalos['Zu'][sub_rows]      # real-space cosmological redshift
     mock['Vpeak']  = subhalos['Vpeak'][sub_rows]
     mock['Mvir']   = subhalos['Mvir_all'][sub_rows]
+    mock['Mhost']  = subhalos['Mhost'][sub_rows]    # host halo mass (= Mvir_all for centrals, top-level host for satellites)
+    mock['pid']    = subhalos['pid'][sub_rows]       # immediate parent ID (-1 for centrals)
+    mock['upid']   = subhalos['upid'][sub_rows]      # ultimate parent ID (-1 for centrals)
     mock['sub_ID'] = subhalos['ID'][sub_rows]
 
     if 'Zobs' in subhalos.colnames:

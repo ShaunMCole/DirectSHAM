@@ -32,6 +32,7 @@ multiprocessing.set_start_method('fork', force=True)
 import argparse
 import gc
 import glob
+import os
 import sys
 import time
 from pathlib import Path
@@ -118,9 +119,9 @@ def add_sky_coords(subhalos, log):
         subhalos.remove_column(col)
     gc.collect()
 
-    subhalos['conc'] = subhalos['Rvir'] / subhalos['rs']
-    subhalos.remove_column('Rvir')
-    subhalos.remove_column('rs')
+    #subhalos['conc'] = subhalos['Rvir'] / subhalos['rs']
+    #subhalos.remove_column('Rvir')
+    #subhalos.remove_column('rs')
     gc.collect()
 
     z_grid  = np.linspace(0.0, 1.0, 10000)
@@ -246,7 +247,7 @@ def main():
         xobs=xobs,
         yobs=yobs,
         zobs=zobs,
-        use_tmpfiles=True,
+        use_tmpfiles=False,
         tmpdir=read_tmpdir,
     )
     log.info(f'Read {len(subhalos):,} subhalos in {time.time()-t0:.1f}s')

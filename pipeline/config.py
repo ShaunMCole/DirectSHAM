@@ -133,7 +133,7 @@ SNAPSHOT_INDEX = 45       # Snapshot used for cut-sky mocks (z ≈ 0.19)
 
 # Columns to read from the Uchuu hdf5 files.
 UCHUU_COLUMNS = (
-    "id", "Mvir_all", "Vpeak",
+    "id", "pid", "upid", "Mvir_all", "Vpeak",
     "x", "y", "z", "vx", "vy", "vz",
     "Mpeak_Scale",
 )

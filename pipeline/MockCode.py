@@ -139,6 +139,34 @@ def read_halolist_file_reps(file_path, randseed, columns, min_logMvir=10.4, min_
 
     
     # ------------------------------------------------------------
+    # Compute Mhost: host halo mass for each subhalo.
+    # For centrals (upid == -1), Mhost = Mvir_all.
+    # For satellites, Mhost = Mvir_all of the top-level host (upid).
+    # This must be done before replication because IDs are made unique
+    # per replica afterwards, breaking the upid -> id lookup.
+    # We use upid (ultimate parent) rather than pid (immediate parent)
+    # so that sub-subhalos also get the correct top-level host mass.
+    # The completeness check confirms all upid values are found within
+    # the same file (fraction = 1.000000, 0 orphans).
+    # ------------------------------------------------------------
+    id_arr   = results['id']
+    upid_arr = results['upid']
+    mvir_arr = results['Mvir_all']
+
+    # Build id -> Mvir_all map for centrals (upid == -1)
+    is_central  = (upid_arr == -1)
+    id_to_mvir  = dict(zip(id_arr[is_central], mvir_arr[is_central]))
+
+    # Assign Mhost
+    mhost = np.where(
+        is_central,
+        mvir_arr,
+        np.array([id_to_mvir.get(u, np.nan) for u in upid_arr], dtype=np.float32)
+    )
+    results['Mhost'] = mhost.astype(np.float32)
+    del id_to_mvir, id_arr, upid_arr, mvir_arr, is_central, mhost
+
+    # ------------------------------------------------------------
     # Reposition the box about the chosen observer
     # ------------------------------------------------------------
 
@@ -195,6 +223,14 @@ def read_halolist_file_reps(file_path, randseed, columns, min_logMvir=10.4, min_
             elif k == 'id':
                 # Make IDs unique across replicas
                 out[k].append((results[k] * nrep + irep)[keep])
+
+            elif k in ('pid', 'upid'):
+                # Transform pid/upid consistently with id so that parent
+                # lookups remain valid after replication, while preserving
+                # the sentinel value -1 that identifies centrals.
+                arr = results[k]
+                transformed = np.where(arr == -1, -1, arr * nrep + irep)
+                out[k].append(transformed[keep])
 
             else:
                 out[k].append(results[k][keep])
@@ -566,12 +602,12 @@ def pre_sort_subhalos(subhalos, N_neigh=100, sig_lgv_ref=0.0, sig_lgv_slope=0.0,
     # Rank index
     start_time = time.time()
     #First check if int32 is sufficient to rank all the subhalos
-    if nsub > np.iinfo(np.int32).max:
-            raise RuntimeError(
-            f"{nsub=} exceeds int32 limit "
-            f"{np.iinfo(np.int32).max}"
-        )
-    subhalos['i1'] = np.arange(1, nsub + 1, dtype=np.int32)
+    #if nsub > np.iinfo(np.int32).max:
+    #        raise RuntimeError(
+    #       f"{nsub=} exceeds int32 limit "
+    #        f"{np.iinfo(np.int32).max}"
+    #    )
+    subhalos['i1'] = np.arange(1, nsub + 1, dtype=np.int64)
     print('These numbers should be the same if ranking done as expected. nsub=',len(subhalos),'?=?',np.max(subhalos["i1"]))
     print('and  1 ?=?', np.min(subhalos["i1"]))
     end_time = time.time()
