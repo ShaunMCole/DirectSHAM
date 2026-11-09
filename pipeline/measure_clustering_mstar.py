@@ -95,7 +95,10 @@ def parse_args():
                    help="Selection variable: mr, cigale, or fsf (default: cigale)")
     # Cut values
     p.add_argument("--mstar_cut", type=float, default=None,
-                   help="Stellar mass threshold log M* (for cigale or fsf mode)")
+                   help="Stellar mass lower limit log M* (for cigale or fsf mode)")
+    p.add_argument("--mstar_max", type=float, default=None,
+                   help="Stellar mass upper limit log M* (for cigale or fsf bin mode; "
+                        "if omitted, a threshold sample is used)")
     p.add_argument("--mr_cut", type=float, default=-21.5,
                    help="Absolute magnitude cut (for mr mode, default: -21.5)")
     # Redshift limits
@@ -133,7 +136,7 @@ def parse_args():
 # =============================================================================
 
 def apply_cuts(infile, outfile, sample_type, cut_value, zmin, zmax,
-               is_mock, log, sfq=None, logssfr_cut=-11.0):
+               is_mock, log, sfq=None, logssfr_cut=-11.0, mstar_max=None):
     """
     Apply redshift and sample selection cuts; write trimmed catalogue.
     For mocks: rename Zobs→Z for xirunpc.py.
@@ -155,6 +158,9 @@ def apply_cuts(infile, outfile, sample_type, cut_value, zmin, zmax,
             mask &= cat[col] < cut_value
         else:
             mask &= cat[col] > cut_value
+            if mstar_max is not None:
+                mask &= cat[col] <= mstar_max
+                log.info(f"  Stellar mass bin: {cut_value} < {col} <= {mstar_max}")
     else:
         log.info(f"  Column {col!r} not found — no selection cut applied")
 
@@ -204,13 +210,16 @@ def main():
         sys.exit(1)
     cut_value = args.mstar_cut if args.sample_type in ("cigale", "fsf") \
                 else args.mr_cut
+    mstar_max = args.mstar_max if args.sample_type in ("cigale", "fsf") else None
 
     cfg       = SAMPLE_CFG[args.sample_type]
     label     = cfg["label"]
     is_mock   = (args.mode == "mock")
 
     log.info(f"mode={args.mode}  sample_type={args.sample_type}  "
-             f"cut={cut_value}  zmin={args.zmin}  zmax={args.zmax}"
+             f"cut={cut_value}" +
+             (f"  mstar_max={mstar_max}" if mstar_max else "") +
+             f"  zmin={args.zmin}  zmax={args.zmax}"
              + (f"  sfq={args.sfq}" if args.sfq else ""))
 
     lss_script = Path(args.lss_script) if args.lss_script else LSS_SCRIPT
@@ -224,8 +233,9 @@ def main():
                        f_colour=args.f_colour, alpha=args.alpha)
 
     # Output directory
-    sfq_suffix = f"_{args.sfq}" if args.sfq else ""
-    sample_tag = f"{label}{cut_value}_z{args.zmin:.2f}-{args.zmax:.2f}{sfq_suffix}"
+    sfq_suffix  = f"_{args.sfq}" if args.sfq else ""
+    mstar_range = f"{cut_value}-{mstar_max}" if mstar_max else f"{cut_value}"
+    sample_tag  = f"{label}{mstar_range}_z{args.zmin:.3f}-{args.zmax:.3f}{sfq_suffix}"
     if args.outdir:
         outdir = Path(args.outdir)
     elif is_mock:
@@ -270,7 +280,8 @@ def main():
     for src, dst in pairs:
         apply_cuts(src, dst, args.sample_type, cut_value,
                    args.zmin, args.zmax, is_mock, log,
-                   sfq=args.sfq, logssfr_cut=args.logssfr_cut)
+                   sfq=args.sfq, logssfr_cut=args.logssfr_cut,
+                   mstar_max=mstar_max)
 
     # -------------------------------------------------------------------------
     # Step 2: Symlink parent catalogues (data mode only)
@@ -307,7 +318,7 @@ def main():
         "--njack",       njack,
         "--weight_type", weight_type,
         "--bin_type",    "log",
-        "--zlim",        f"{args.zmin:.2f}", f"{args.zmax:.2f}",
+        "--zlim",        f"{args.zmin:.3f}", f"{args.zmax:.3f}",
         "--nran",        "1",
         "--outdir",      str(outdir),
     ]
