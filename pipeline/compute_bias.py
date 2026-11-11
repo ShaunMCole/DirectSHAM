@@ -231,7 +231,7 @@ def _load_mock_cache():
     global _MOCK_CACHE, _CENTRAL_PID
     if _MOCK_CACHE is not None:
         return
-    cols = ['Zobs', 'ABSMAG_RP1', 'REST_GMR_0P1', 'Mvir_all', 'ID', 'pid']
+    cols = ['Zobs', 'ABSMAG_RP1', 'REST_GMR_0P1', 'Mhost', 'ID', 'pid']
     parts = []
     for cat in MOCK_CATS:
         if not Path(cat).exists():
@@ -247,7 +247,8 @@ def _load_mock_cache():
           f"(occurs {counts.max()} times out of {len(_MOCK_CACHE)})")
 
 def get_halo_properties(mr_cut, zmin, zmax, subset=''):
-    """Return (median Mvir_all, satellite fraction) for mock galaxies in sample."""
+    """Return (median Mhost centrals, median Mhost satellites, satellite fraction)
+    for mock galaxies in sample."""
     _load_mock_cache()
     z   = _MOCK_CACHE['Zobs']
     mr  = _MOCK_CACHE['ABSMAG_RP1']
@@ -261,13 +262,23 @@ def get_halo_properties(mr_cut, zmin, zmax, subset=''):
         mask &= (gmr < 0.6)
 
     if mask.sum() == 0:
-        return np.nan, np.nan
+        return np.nan, np.nan, np.nan
 
-    mvir    = _MOCK_CACHE['Mvir_all'][mask]
-    is_sat  = pid[mask] != _CENTRAL_PID
-    median_mvir = float(np.median(mvir))
-    sat_frac    = float(is_sat.sum() / mask.sum())
-    return median_mvir, sat_frac
+    mhost  = _MOCK_CACHE['Mhost'][mask]
+    is_sat = pid[mask] != _CENTRAL_PID
+    is_cen = ~is_sat
+
+    median_mhost_cen = float(np.nanmedian(mhost[is_cen])) if is_cen.sum() > 0 else np.nan
+    median_mhost_sat = float(np.nanmedian(mhost[is_sat])) if is_sat.sum() > 0 else np.nan
+    sat_frac         = float(is_sat.sum() / mask.sum())
+    n_sat = is_sat.sum()
+    n_sat_nan = np.isnan(mhost[is_sat]).sum()
+    n_cen_nan = np.isnan(mhost[is_cen]).sum()
+    print(f"  Mhost NaN fraction: cen={n_cen_nan}/{is_cen.sum()} "
+          f"({100*n_cen_nan/max(is_cen.sum(),1):.2f}%), "
+          f"sat={n_sat_nan}/{n_sat} "
+          f"({100*n_sat_nan/max(n_sat,1):.2f}%)")
+    return median_mhost_cen, median_mhost_sat, sat_frac
 
 # =============================================================================
 # Path helpers (from S5PanelClustering1.py)
@@ -446,20 +457,22 @@ def main():
     # -------------------------------------------------------------------------
     r_all = results['']
     print("\n% LaTeX table of samples, redshift ranges, median redshifts, "
-          "median halo mass and satellite fraction")
-    print(r"\begin{tabular}{cccccc}")
+          "median host halo mass (centrals and satellites separately) and satellite fraction")
+    print(r"\begin{tabular}{ccccccc}")
     print(r"\hline")
     print(r"$M_r$ & $z_{\rm min}$ & $z_{\rm max}$ & $\bar{z}$ & "
-          r"$\log_{10}\tilde{M}_{\rm vir}$ & $f_{\rm sat}$ \\")
+          r"$\log_{10}\tilde{M}_{\rm host}^{\rm cen}$ & "
+          r"$\log_{10}\tilde{M}_{\rm host}^{\rm sat}$ & $f_{\rm sat}$ \\")
     print(r"\hline")
     for sample, zeff in zip(SAMPLES, r_all['zeff']):
         mr = sample['mr_cut']
         z0 = sample['zmin']
         z1 = sample['zmax']
-        mvir, fsat = get_halo_properties(mr, z0, z1, subset='')
-        log_mvir = np.log10(mvir) if np.isfinite(mvir) else float('nan')
+        mcen, msat, fsat = get_halo_properties(mr, z0, z1, subset='')
+        log_mcen = np.log10(mcen) if np.isfinite(mcen) else float('nan')
+        log_msat = np.log10(msat) if np.isfinite(msat) else float('nan')
         print(rf"${mr:.1f}$ & ${z0:.2f}$ & ${z1:.2f}$ & ${zeff:.3f}$ & "
-              rf"${log_mvir:.2f}$ & ${fsat:.3f}$ \\")
+              rf"${log_mcen:.2f}$ & ${log_msat:.2f}$ & ${fsat:.3f}$ \\")
     print(r"\hline")
     print(r"\end{tabular}")
 

@@ -123,7 +123,7 @@ def compute_hod(mr_cut, zmin, zmax):
 # Plot
 # =============================================================================
 
-fig, ax = plt.subplots(figsize=(5.0, 4.0), constrained_layout=True)
+fig, ax = plt.subplots(figsize=(3.35, 3.8), constrained_layout=True)
 
 for sample, color in zip(SAMPLES, COLORS):
     mr  = sample['mr_cut']
@@ -138,18 +138,30 @@ for sample, color in zip(SAMPLES, COLORS):
     ax.plot(mc[good], hod_cen[good], '--', color=color, lw=1.0)
     ax.plot(mc[good], hod_sat[good], ':',  color=color, lw=1.0)
 
-# Legend for line styles
-ax.plot([], [], 'k-',  lw=1.5, label='Total')
-ax.plot([], [], 'k--', lw=1.0, label='Centrals')
-ax.plot([], [], 'k:',  lw=1.0, label='Satellites')
-
 ax.set_yscale('log')
 ax.set_xlim(MMIN, MMAX)
-ax.set_ylim(1e-3, 10)
-ax.set_xlabel(r'$\log_{10}(M_{\rm vir} \; [h^{-1} M_\odot])$')
+ax.set_ylim(10**-2.5, 10**1.5)
+ax.set_xlabel(r'$\log_{10}(M_{\rm host} \; [h^{-1} M_\odot])$')
 ax.set_ylabel(r'$\langle N \rangle$')
-ax.legend(fontsize=6, frameon=False, ncol=2)
 ax.grid(alpha=0.2)
+
+# Line style legend — top left
+style_handles = [
+    plt.Line2D([], [], color='k', ls='-',  lw=1.5, label='Total'),
+    plt.Line2D([], [], color='k', ls='--', lw=1.0, label='Centrals'),
+    plt.Line2D([], [], color='k', ls=':',  lw=1.0, label='Satellites'),
+]
+leg1 = ax.legend(handles=style_handles, fontsize=6, frameon=False,
+                 loc='upper left')
+ax.add_artist(leg1)
+
+# Magnitude legend — bottom right, single column
+mag_handles = [
+    plt.Line2D([], [], color=c, ls='-', lw=1.5, label=rf'$M_r < {s["mr_cut"]}$')
+    for s, c in zip(SAMPLES, COLORS)
+]
+ax.legend(handles=mag_handles, fontsize=6, frameon=False,
+          loc='lower right', ncol=1)
 
 for ext in ('pdf', 'jpg'):
     out = f"{OUT_STEM}.{ext}"

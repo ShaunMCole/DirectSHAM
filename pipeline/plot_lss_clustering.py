@@ -42,10 +42,10 @@ LSS_ZMAX       =  0.3
 DATA_NJACK     = 60
 
 # Colours
-COL_XI0_DATA  = '#1f1f1f'
-COL_XI2_DATA  = '#888888'
-COL_XI0_LC    = '#d62728'   # mock monopole (lightcone solid, cut-sky dashed)
-COL_XI2_LC    = '#ff9896'   # mock quadrupole (lightcone solid, cut-sky dashed)
+COL_XI0_DATA = '#1f1f1f'   # data monopole (black)
+COL_XI2_DATA = '#888888'   # data quadrupole (grey)
+COL_LC       = '#1f77b4'   # lightcone mock (blue)
+COL_CS       = '#d62728'   # cut-sky mock (red)
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -88,8 +88,8 @@ def mock_lc_file(lss_clus_dir):
 
 
 def mock_cs_file(paths):
-    """Cut-sky mock clustering result — lives under model_dir/clustering/lss/."""
-    smu_dir = paths["model_dir"] / "clustering" / "lss" / "mock" / "smu"
+    """Cut-sky mock clustering result — lives under model_dir/clustering/lss/mock_cutsky/smu/."""
+    smu_dir = paths["model_dir"] / "clustering" / "lss" / "mock_cutsky" / "smu"
     return _smu_glob(smu_dir)
 
 # ---------------------------------------------------------------------------
@@ -150,60 +150,151 @@ def main():
     # --- Plot ---
     fig, ax = plt.subplots(figsize=(3.35, 3.0))
 
-    legend_handles = []
-
+    # ------------------------------------------------------------------
     # Data
+    # ------------------------------------------------------------------
+    s_d = xi_d = er_d = None
     if data_result is not None:
         s, xi, err, good, has_cov = extract_multipoles(data_result, ells)
         s_d  = s[good]
         xi_d = {ell: xi[ell][good]  for ell in ells}
         er_d = {ell: err[ell][good] for ell in ells}
-        cols    = {0: COL_XI0_DATA, 2: COL_XI2_DATA}
-        markers = {0: 'o', 2: 's'}
-        labels  = {0: r'Data $\xi_0$', 2: r'Data $\xi_2$'}
+        markers = {0: 'o',          2: 's'}
+        dcols   = {0: COL_XI0_DATA, 2: COL_XI2_DATA}
         for ell in ells:
             y    = s_d**2 * xi_d[ell]
             yerr = s_d**2 * er_d[ell]
             if has_cov and np.any(er_d[ell] > 0):
-                h = ax.errorbar(s_d, y, yerr=yerr,
-                                fmt=markers[ell], color=cols[ell],
-                                ms=1.5, capsize=1.5, lw=0.7, zorder=10,
-                                label=labels[ell])
+                ax.errorbar(s_d, y, yerr=yerr,
+                            fmt=markers[ell], color=dcols[ell],
+                            ms=1.2, capsize=1.2, lw=0.6, zorder=10)
             else:
-                h, = ax.plot(s_d, y, markers[ell], color=cols[ell],
-                             ms=1.5, zorder=10, label=labels[ell])
-            legend_handles.append(h)
+                ax.plot(s_d, y, markers[ell], color=dcols[ell],
+                        ms=1.2, zorder=10)
 
+    # ------------------------------------------------------------------
     # Lightcone mock
+    # ------------------------------------------------------------------
+    ls = {0: '-', 2: '--'}   # solid monopole, dashed quadrupole for all mocks
     if lc_result is not None:
         s, xi, _, good, _ = extract_multipoles(lc_result, ells)
-        s_m  = s[good]
-        xi_m = {ell: xi[ell][good] for ell in ells}
-        cols_lc   = {0: COL_XI0_LC, 2: COL_XI2_LC}
-        ls_lc     = {0: '-',        2: '--'}
-        # Label as "Mock" if no cut-sky comparison; "Lightcone" if --cutsky
-        lc_prefix = 'Lightcone' if args.cutsky else 'Mock'
-        labels_lc = {0: rf'{lc_prefix} $\xi_0$', 2: rf'{lc_prefix} $\xi_2$'}
+        s_m = s[good]
         for ell in ells:
-            h, = ax.plot(s_m, s_m**2 * xi_m[ell],
-                         lw=0.9, color=cols_lc[ell], ls=ls_lc[ell],
-                         label=labels_lc[ell])
-            legend_handles.append(h)
+            ax.plot(s_m, s_m**2 * xi[ell][good],
+                    lw=0.9, color=COL_LC, ls=ls[ell])
 
+    # ------------------------------------------------------------------
     # Cut-sky mock (optional)
+    # ------------------------------------------------------------------
     if cs_result is not None:
         s, xi, _, good, _ = extract_multipoles(cs_result, ells)
-        s_m  = s[good]
-        xi_m = {ell: xi[ell][good] for ell in ells}
-        # Same colours as lightcone; dotted lines to distinguish from solid/dashed
-        cols_cs   = {0: COL_XI0_LC, 2: COL_XI2_LC}
-        ls_cs     = {0: ':',        2: (0, (3, 1, 1, 1))}   # dotted / dash-dot
-        labels_cs = {0: r'Cut-sky $\xi_0$', 2: r'Cut-sky $\xi_2$'}
+        s_m = s[good]
         for ell in ells:
-            h, = ax.plot(s_m, s_m**2 * xi_m[ell],
-                         lw=0.9, color=cols_cs[ell], ls=ls_cs[ell],
-                         label=labels_cs[ell])
-            legend_handles.append(h)
+            ax.plot(s_m, s_m**2 * xi[ell][good],
+                    lw=0.9, color=COL_CS, ls=ls[ell])
+
+    # ------------------------------------------------------------------
+    # Two-part legend:
+    #   Part 1 (line style): solid=xi_0, dashed=xi_2  — drawn in black
+    #   Part 2 (colour):     blue=Lightcone, red=Cut-sky; plus Data
+    # ------------------------------------------------------------------
+    import matplotlib.lines as mlines
+    import matplotlib.patches as mpatches
+
+    # ------------------------------------------------------------------
+    # Compound legend entries: each row shows solid/dashed line AND
+    # the corresponding data marker+errorbar, all to the left of the label.
+    # We use a custom HandlerBase subclass to draw both elements.
+    # ------------------------------------------------------------------
+    from matplotlib.legend_handler import HandlerBase
+    from matplotlib.patches import FancyArrowPatch
+
+    class CompoundHandler(HandlerBase):
+        """
+        Draws a line (with given ls) and a marker with a small errorbar
+        in the legend key area.
+        line_color  : colour of the model line
+        ls          : linestyle of the model line ('-' or '--')
+        marker      : marker style for data point
+        marker_color: colour of the data marker and errorbar
+        """
+        def __init__(self, line_color, ls, marker, marker_color, **kw):
+            self.line_color   = line_color
+            self.ls           = ls
+            self.marker       = marker
+            self.marker_color = marker_color
+            super().__init__(**kw)
+
+        def create_artists(self, legend, orig_handle,
+                           xdescent, ydescent, width, height, fontsize, trans):
+            artists = []
+            yc = height / 2  # vertical centre of key box
+
+            # Model line occupies left 55% of key box
+            x_line_end = xdescent + width * 0.55
+            line = mlines.Line2D(
+                [xdescent, x_line_end],
+                [yc, yc],
+                color=self.line_color, ls=self.ls, lw=0.9,
+                transform=trans)
+            artists.append(line)
+
+            # Data marker+errorbar in right 45%, with a small gap after line
+            xm  = xdescent + width * 0.78
+            cap = height * 0.52   # taller errorbar
+
+            # Errorbar vertical line
+            eb = mlines.Line2D(
+                [xm, xm], [yc - cap, yc + cap],
+                color=self.marker_color, lw=0.6, transform=trans)
+            # Errorbar caps — narrower
+            cap_lo = mlines.Line2D(
+                [xm - 1, xm + 1], [yc - cap, yc - cap],
+                color=self.marker_color, lw=0.6, transform=trans)
+            cap_hi = mlines.Line2D(
+                [xm - 1, xm + 1], [yc + cap, yc + cap],
+                color=self.marker_color, lw=0.6, transform=trans)
+            # Marker point — small so errorbars are clearly visible
+            pt = mlines.Line2D(
+                [xm], [yc],
+                marker=self.marker, color=self.marker_color,
+                ms=2.0, ls='none', transform=trans)
+            artists += [eb, cap_lo, cap_hi, pt]
+            return artists
+
+    # Dummy handle objects — content is irrelevant, handler does all the work
+    class _DummyHandle:
+        pass
+
+    h_xi0 = _DummyHandle()
+    h_xi2 = _DummyHandle()
+
+    handler_map = {
+        h_xi0: CompoundHandler(line_color='k', ls='-',
+                               marker='o', marker_color=COL_XI0_DATA),
+        h_xi2: CompoundHandler(line_color='k', ls='--',
+                               marker='s', marker_color=COL_XI2_DATA),
+    }
+
+    leg1 = ax.legend(
+        handles=[h_xi0, h_xi2],
+        labels=[r'$\xi_0$', r'$\xi_2$'],
+        handler_map=handler_map,
+        fontsize=7, loc='upper left', framealpha=0.8,
+        handlelength=3.5,   # wider key box to fit both line and marker
+    )
+    ax.add_artist(leg1)
+
+    # Colour legend
+    h_lc = mpatches.Patch(color=COL_LC, label='Lightcone mock')
+    h_cs = mpatches.Patch(color=COL_CS, label='Cut-sky mock')
+    colour_handles = []
+    if lc_result is not None:
+        colour_handles.append(h_lc)
+    if cs_result is not None:
+        colour_handles.append(h_cs)
+    ax.legend(handles=colour_handles, fontsize=7, framealpha=0.8,
+              loc='upper left', bbox_to_anchor=(0.02, 0.38))
 
     # Annotations
     ax.text(0.03, 0.04,
@@ -211,8 +302,6 @@ def main():
             rf"${LSS_ZMIN} \leq z \leq {LSS_ZMAX}$",
             transform=ax.transAxes, fontsize=7, va='bottom', ha='left',
             bbox=dict(boxstyle='round,pad=0.2', fc='white', alpha=0.7, ec='none'))
-
-    ax.legend(handles=legend_handles, fontsize=7, loc='upper left', framealpha=0.8)
     ax.axhline(0, color='k', lw=0.7, ls='--')
     ax.set_xscale('log')
     ax.set_xlim(0.5, 150)

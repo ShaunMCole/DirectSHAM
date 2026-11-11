@@ -85,6 +85,8 @@ def parse_args():
                    help="Measure mock clustering only (skip data).")
     p.add_argument("--data_only", action="store_true",
                    help="Measure data clustering only (skip mock).")
+    p.add_argument("--cutsky", action="store_true",
+                   help="Use cut-sky mock instead of lightcone mock.")
     return p.parse_args()
 
 # ---------------------------------------------------------------------------
@@ -230,21 +232,27 @@ def main():
                                     sig_lgv_slope=args.sig_lgv_slope,
                                     f_colour=args.f_colour, alpha=args.alpha)
 
-    # Output root: lightcone clustering dir / lss/
-    lss_clus_dir = lc_paths["clustering_dir"] / "lss"
+    # Output root: lightcone clustering dir / lss/  (or model_dir / clustering / lss/ for cutsky)
+    if args.cutsky:
+        lss_clus_dir = paths["model_dir"] / "clustering" / "lss"
+    else:
+        lss_clus_dir = lc_paths["clustering_dir"] / "lss"
+
+    mock_tag = "mock_cutsky" if args.cutsky else "mock"
 
     # =========================================================================
     # MOCK
     # =========================================================================
     if not args.data_only:
-        log.info("=== MOCK clustering ===")
-        mock_outdir = lss_clus_dir / "mock"
+        log.info(f"=== MOCK clustering ({'cut-sky' if args.cutsky else 'lightcone'}) ===")
+        mock_outdir  = lss_clus_dir / mock_tag
         mock_basedir = mock_outdir / "catalogues"
         mock_basedir.mkdir(parents=True, exist_ok=True)
         mock_outdir.mkdir(parents=True, exist_ok=True)
 
         for cap in args.regions:
-            mock_path = lc_paths[f"mock_lightcone_{cap}"]
+            mock_path = (paths[f"mock_{cap}"] if args.cutsky
+                         else lc_paths[f"mock_lightcone_{cap}"])
             if not mock_path.exists():
                 log.error(f"Lightcone mock not found: {mock_path}")
                 sys.exit(1)
@@ -266,6 +274,7 @@ def main():
 
         run_xirunpc(mock_basedir, mock_outdir, args.regions, lss_script, env,
                     log, weight_type='default', njack=0)
+
 
     # =========================================================================
     # DATA

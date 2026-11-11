@@ -14,7 +14,8 @@ from desimodel.footprint import is_point_in_desi
 import matplotlib.pyplot as plt
 
 # Add gaussian scatter to log10(Vpeak) before ranking if required   
-def apply_log_scatter(x, sigma=None, sig_lgv_ref=None, sig_lgv_slope=None, lgv_pivot=2.6):
+def apply_log_scatter(x, sigma=None, sig_lgv_ref=None, sig_lgv_slope=None,
+                      lgv_pivot=2.6, alpha_v=0.0, f_col_proxy=None):
     """
     Apply log-normal scatter to x (e.g. Vpeak).
 
@@ -24,20 +25,38 @@ def apply_log_scatter(x, sigma=None, sig_lgv_ref=None, sig_lgv_slope=None, lgv_p
                                             sig_lgv_slope=0.24, lgv_pivot=2.6)
         In this mode sigma(x) = max(0, sig_lgv_ref + sig_lgv_slope*(log10(x) - lgv_pivot))
         and no intermediate sigma array is retained after the scatter is drawn.
+
+    Optional correlated scatter (alpha_v != 0):
+      When alpha_v > 0 and f_col_proxy is provided, the scatter epsilon is
+      drawn as a linear combination of an assembly-history term and an
+      independent Gaussian (equation 7 of Cole et al. 2026):
+
+          x_col = sqrt(3) * (2*f_col_proxy - 1)   [zero mean, unit variance]
+          eta   ~ N(0, 1)
+          eps   = sigma_v * [alpha_v * x_col + sqrt(1 - alpha_v^2) * eta]
+
+      Early-forming haloes (large f_col_proxy, small Mpeak_Scale) have
+      x_col > 0 and therefore receive a positive boost to their scattered
+      Vpeak, so they are preferentially matched to brighter galaxies.
     """
     if sig_lgv_ref is not None:
-        # Compute per-element sigma on the fly and draw scatter in one step
-        log_x = np.log10(x)
+        log_x     = np.log10(x)
         sigma_arr = sig_lgv_ref + sig_lgv_slope * (log_x - lgv_pivot)
         np.clip(sigma_arr, 0.0, None, out=sigma_arr)
-        scatter = np.random.normal(loc=0.0, scale=sigma_arr)
-        del sigma_arr  # free immediately
+        eta = np.random.normal(loc=0.0, scale=1.0, size=len(x))
+        if alpha_v != 0.0 and f_col_proxy is not None:
+            # Rescale f_col_proxy to zero mean, unit variance
+            x_col = np.sqrt(3.0) * (2.0 * np.asarray(f_col_proxy) - 1.0)
+            eta   = alpha_v * x_col + np.sqrt(1.0 - alpha_v**2) * eta
+            del x_col
+        scatter = sigma_arr * eta
+        del sigma_arr, eta
         return x * 10.0**scatter
     elif sigma is None or sigma == 0.0:
         return x
     else:
-        scatter = np.random.normal(loc=0.0, scale=sigma, size=len(x))
-        return x * 10.0**scatter
+        eta = np.random.normal(loc=0.0, scale=sigma, size=len(x))
+        return x * 10.0**eta
 
 #Generate a random set of Euler angles
 def random_euler_angles(seed=None):
@@ -492,7 +511,8 @@ def compute_frac_local(z, N_neigh):
 #iii) Add scatter to Vpeak and sort again
 # iv) Trim the catalogue by applying a tailored Vpeak(z) threshold
 def pre_sort_subhalos(subhalos, N_neigh=100, sig_lgv_ref=0.0, sig_lgv_slope=0.0,
-                      lgv_pivot=2.6, f_colour=0.0, seed_fcolour=42, plot=False):
+                      lgv_pivot=2.6, f_colour=0.0, seed_fcolour=42,
+                      alpha_v=0.0, plot=False):
     
     start_time = time.time()
     print("Starting sort")
@@ -542,7 +562,14 @@ def pre_sort_subhalos(subhalos, N_neigh=100, sig_lgv_ref=0.0, sig_lgv_slope=0.0,
             vpeak_old = subhalos['Vpeak'][idx].copy()  # small sampled copy only
             log_mpeak_s = np.log10(subhalos['Mvir_all'][idx])  # grab Mpeak at same indices
 
-        subhalos['Vpeak'] = apply_log_scatter(subhalos['Vpeak'],sig_lgv_ref=sig_lgv_ref,sig_lgv_slope=sig_lgv_slope,lgv_pivot=lgv_pivot)
+        subhalos['Vpeak'] = apply_log_scatter(
+            subhalos['Vpeak'],
+            sig_lgv_ref=sig_lgv_ref,
+            sig_lgv_slope=sig_lgv_slope,
+            lgv_pivot=lgv_pivot,
+            alpha_v=alpha_v,
+            f_col_proxy=subhalos['FracZpeak'] if alpha_v != 0.0 else None,
+        )
         if plot:
             vpeak_new = subhalos['Vpeak'][idx].copy()  # grab sample BEFORE sort
 
