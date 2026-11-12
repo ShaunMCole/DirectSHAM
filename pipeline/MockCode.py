@@ -35,7 +35,7 @@ def apply_log_scatter(x, sigma=None, sig_lgv_ref=None, sig_lgv_slope=None,
           eta   ~ N(0, 1)
           eps   = sigma_v * [alpha_v * x_col + sqrt(1 - alpha_v^2) * eta]
 
-      Early-forming haloes (large f_col_proxy, small Mpeak_Scale) have
+      Early-forming haloes (small f_col_proxy, large Mpeak_Scale) have
       x_col > 0 and therefore receive a positive boost to their scattered
       Vpeak, so they are preferentially matched to brighter galaxies.
     """
@@ -46,7 +46,7 @@ def apply_log_scatter(x, sigma=None, sig_lgv_ref=None, sig_lgv_slope=None,
         eta = np.random.normal(loc=0.0, scale=1.0, size=len(x))
         if alpha_v != 0.0 and f_col_proxy is not None:
             # Rescale f_col_proxy to zero mean, unit variance
-            x_col = np.sqrt(3.0) * (2.0 * np.asarray(f_col_proxy) - 1.0)
+            x_col = np.sqrt(3.0) * (1.0 - 2.0 * np.asarray(f_col_proxy))
             eta   = alpha_v * x_col + np.sqrt(1.0 - alpha_v**2) * eta
             del x_col
         scatter = sigma_arr * eta
