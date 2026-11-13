@@ -26,17 +26,19 @@ def apply_log_scatter(x, sigma=None, sig_lgv_ref=None, sig_lgv_slope=None,
         In this mode sigma(x) = max(0, sig_lgv_ref + sig_lgv_slope*(log10(x) - lgv_pivot))
         and no intermediate sigma array is retained after the scatter is drawn.
 
-    Optional additive assembly-history scatter (alpha_v != 0):
-      When alpha_v > 0 and f_col_proxy is provided, the scatter epsilon is
-      the sum of a fixed assembly-history term and the standard Gaussian:
+    Optional assembly-history scatter with luminosity-dependent suppression:
+      When alpha_v > 0 and f_col_proxy is provided:
 
           x_col = sqrt(3) * (1 - 2*f_col_proxy)   [zero mean, unit variance]
           eta   ~ N(0, 1)
-          eps   = alpha_v * x_col + sigma_v * eta
+          eps   = alpha_v * SIGMA_MIN / max(sigma_v, SIGMA_MIN) * x_col
+                  + sigma_v * eta
 
-      The boost amplitude alpha_v is independent of luminosity, so faint
-      haloes (small sigma_v) are affected by the same absolute amount as
-      bright ones. Note: Var(eps) = alpha_v^2 + sigma_v^2 > sigma_v^2.
+      alpha_v is the maximum boost in log10(Vpeak), attained at the faint
+      end where sigma_v <= SIGMA_MIN. At the bright end (large sigma_v) the
+      boost is suppressed as SIGMA_MIN/sigma_v, so luminous samples are
+      minimally affected. SIGMA_MIN = 0.035 is hardwired to the median
+      sigma_v of the faintest sample (Mr < -17.5).
       Early-forming haloes (small f_col_proxy, large Mpeak_Scale) have
       x_col > 0 and therefore receive a positive boost to their scattered
       Vpeak, so they are preferentially matched to brighter galaxies.
@@ -47,14 +49,19 @@ def apply_log_scatter(x, sigma=None, sig_lgv_ref=None, sig_lgv_slope=None,
         np.clip(sigma_arr, 0.0, None, out=sigma_arr)
         eta = np.random.normal(loc=0.0, scale=1.0, size=len(x))
         if alpha_v != 0.0 and f_col_proxy is not None:
-            # Additive assembly-history term, independent of sigma_v:
-            #   epsilon = alpha_v * x_col + sigma_v * eta
-            # This gives a fixed boost in log10(Vpeak) units regardless of
-            # luminosity, so faint haloes (small sigma_v) are equally affected.
-            # Note: Var(epsilon) = alpha_v^2 + sigma_v^2 > sigma_v^2.
+            # Assembly-history boost with luminosity-dependent suppression:
+            #   epsilon = alpha_v * sigma_min / max(sigma_v, sigma_min) * x_col
+            #             + sigma_v * eta
+            # alpha_v is the maximum boost (attained at the faint end where
+            # sigma_v <= sigma_min). The boost is suppressed at the bright end
+            # (large sigma_v) so that luminous samples are minimally affected.
+            # sigma_min is hardwired to the median sigma_v of the faintest
+            # sample (Mr < -17.5), so alpha_v retains a physical interpretation.
+            SIGMA_MIN = 0.035
             x_col   = np.sqrt(3.0) * (1.0 - 2.0 * np.asarray(f_col_proxy))
-            scatter = alpha_v * x_col + sigma_arr * eta
-            del x_col
+            boost   = alpha_v * SIGMA_MIN / np.maximum(sigma_arr, SIGMA_MIN)
+            scatter = boost * x_col + sigma_arr * eta
+            del x_col, boost
         else:
             scatter = sigma_arr * eta
         del sigma_arr, eta
