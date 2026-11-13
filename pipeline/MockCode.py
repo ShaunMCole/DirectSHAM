@@ -26,15 +26,17 @@ def apply_log_scatter(x, sigma=None, sig_lgv_ref=None, sig_lgv_slope=None,
         In this mode sigma(x) = max(0, sig_lgv_ref + sig_lgv_slope*(log10(x) - lgv_pivot))
         and no intermediate sigma array is retained after the scatter is drawn.
 
-    Optional correlated scatter (alpha_v != 0):
+    Optional additive assembly-history scatter (alpha_v != 0):
       When alpha_v > 0 and f_col_proxy is provided, the scatter epsilon is
-      drawn as a linear combination of an assembly-history term and an
-      independent Gaussian (equation 7 of Cole et al. 2026):
+      the sum of a fixed assembly-history term and the standard Gaussian:
 
-          x_col = sqrt(3) * (2*f_col_proxy - 1)   [zero mean, unit variance]
+          x_col = sqrt(3) * (1 - 2*f_col_proxy)   [zero mean, unit variance]
           eta   ~ N(0, 1)
-          eps   = sigma_v * [alpha_v * x_col + sqrt(1 - alpha_v^2) * eta]
+          eps   = alpha_v * x_col + sigma_v * eta
 
+      The boost amplitude alpha_v is independent of luminosity, so faint
+      haloes (small sigma_v) are affected by the same absolute amount as
+      bright ones. Note: Var(eps) = alpha_v^2 + sigma_v^2 > sigma_v^2.
       Early-forming haloes (small f_col_proxy, large Mpeak_Scale) have
       x_col > 0 and therefore receive a positive boost to their scattered
       Vpeak, so they are preferentially matched to brighter galaxies.
@@ -45,11 +47,16 @@ def apply_log_scatter(x, sigma=None, sig_lgv_ref=None, sig_lgv_slope=None,
         np.clip(sigma_arr, 0.0, None, out=sigma_arr)
         eta = np.random.normal(loc=0.0, scale=1.0, size=len(x))
         if alpha_v != 0.0 and f_col_proxy is not None:
-            # Rescale f_col_proxy to zero mean, unit variance
-            x_col = np.sqrt(3.0) * (1.0 - 2.0 * np.asarray(f_col_proxy))
-            eta   = alpha_v * x_col + np.sqrt(1.0 - alpha_v**2) * eta
+            # Additive assembly-history term, independent of sigma_v:
+            #   epsilon = alpha_v * x_col + sigma_v * eta
+            # This gives a fixed boost in log10(Vpeak) units regardless of
+            # luminosity, so faint haloes (small sigma_v) are equally affected.
+            # Note: Var(epsilon) = alpha_v^2 + sigma_v^2 > sigma_v^2.
+            x_col   = np.sqrt(3.0) * (1.0 - 2.0 * np.asarray(f_col_proxy))
+            scatter = alpha_v * x_col + sigma_arr * eta
             del x_col
-        scatter = sigma_arr * eta
+        else:
+            scatter = sigma_arr * eta
         del sigma_arr, eta
         return x * 10.0**scatter
     elif sigma is None or sigma == 0.0:
