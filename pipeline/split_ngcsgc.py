@@ -406,13 +406,31 @@ def main():
         split_mocks(paths, log)
 
     if args.formock or run_all:
-        split_formock_randoms(paths, log)
+        ngc_exists = paths["formock_ran_NGC"].exists()
+        sgc_exists = paths["formock_ran_SGC"].exists()
+        if ngc_exists and sgc_exists:
+            log.info("Skipping formock randoms split — NGC and SGC files already exist.")
+        else:
+            split_formock_randoms(paths, log)
 
     if args.fordata or run_all:
-        split_fordata_randoms(paths, log)
+        # Derive fordata NGC/SGC paths from the N path (same logic as in the function)
+        path_N = paths["fordata_ran_N"]
+        path_ngc = path_N.parent / path_N.name.replace('_N.fits', '_NGC.fits')
+        path_sgc = path_N.parent / path_N.name.replace('_N.fits', '_SGC.fits')
+        if path_ngc.exists() and path_sgc.exists():
+            log.info("Skipping fordata randoms split — NGC and SGC files already exist.")
+        else:
+            split_fordata_randoms(paths, log)
 
     if args.data or run_all:
-        split_data_catalogue(log)
+        from config import BGS_CAT
+        path_ngc = BGS_CAT.parent / (BGS_CAT.stem + "_NGC.fits")
+        path_sgc = BGS_CAT.parent / (BGS_CAT.stem + "_SGC.fits")
+        if path_ngc.exists() and path_sgc.exists():
+            log.info("Skipping data catalogue split — NGC and SGC files already exist.")
+        else:
+            split_data_catalogue(log)
 
     log.info("split_ngcsgc.py complete.")
 
