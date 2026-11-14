@@ -164,7 +164,7 @@ DEFAULT_SIG_LGV_REF   = 0.18
 DEFAULT_SIG_LGV_SLOPE = 0.30
 DEFAULT_LGV_PIVOT     = 2.6   # log10(Vpeak/[km/s]) pivot point
 DEFAULT_F_COLOUR      = 0.0   # Gaussian scatter in log10(Mpeak_Scale) for assembly-bias colour assignment
-DEFAULT_ALPHA         = 0.0   # Correlation between Vpeak scatter and FracZpeak (future parameter)
+DEFAULT_ALPHA         = 0.02  # Assembly-history scatter amplitude (luminosity-dependent suppression, SIGMA_MIN=0.035 hardwired)
 DEFAULT_SEED_FCOLOUR  = 42    # RNG seed for f_colour noise
 DEFAULT_OBS_SEED = 0       # Observer position seed (0 = box centre)
 MIN_VPEAK        = 70.0    # Discard subhalos below this Vpeak [km/s]

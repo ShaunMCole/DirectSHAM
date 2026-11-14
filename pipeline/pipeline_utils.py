@@ -210,7 +210,7 @@ def make_lightcone_paths(
     sig_lgv_ref,
     sig_lgv_slope,
     f_colour=0.0,
-    alpha=0.0,
+    alpha=0.02,
     snapshot=None,
     reg=None,
 ):
