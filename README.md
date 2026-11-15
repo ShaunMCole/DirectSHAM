@@ -76,7 +76,7 @@ boundaries are applied to the real-space redshift Z (not Zobs).
 
 **Workflow:**
 ```bash
-REF=0.18; SLOPE=0.30; FC=0.00; AL=0.00
+REF=0.18; SLOPE=0.30; FC=0.00; AL=0.02
 
 # 1. Run 6 checkpoint jobs (SLURM job array, ~1 hr each)
 #    Snap45 can be symlinked from the existing cut-sky checkpoint instead.
@@ -285,7 +285,7 @@ The Uchuu simulation uses Om0=0.3089 (Planck 2015); this is used only in
 | `sig_lgv_slope` | 0.30 | Gradient σ_{v,1} of scatter with log₁₀(Vpeak) |
 | `lgv_pivot` | 2.6 | log₁₀(V_piv) pivot point |
 | `f_colour` | 0.0 | Assembly-bias colour scatter parameter σ_col |
-| `alpha` | 0.0 | Correlated scatter parameter α_v |
+| `alpha` | 0.02 | Assembly-history scatter parameter α_v (luminosity-dependent suppression, σ_min=0.035 hardwired) |
 | `obs_seed` | 0 | Observer position seed (0 = box centre) |
 | `min_Vpeak` | 70 km/s | Minimum subhalo Vpeak |
 | `N_neigh_vpeak` | 1000 | Neighbours for FracZpeak estimate |
@@ -299,7 +299,7 @@ The Uchuu simulation uses Om0=0.3089 (Planck 2015); this is used only in
 
 ```bash
 cd ~/DirectSHAM
-REF=0.18; SLOPE=0.30; FC=0.00; AL=0.00; SEED=0
+REF=0.18; SLOPE=0.30; FC=0.00; AL=0.02; SEED=0  # current best-fit
 
 # 1. Build the random catalogue (login node, once per data release)
 python pipeline/make_random.py

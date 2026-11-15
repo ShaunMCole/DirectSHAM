@@ -506,7 +506,7 @@ def main():
     bgs_cat_path = args.bgs_cat if args.bgs_cat else str(BGS_CAT)
 
     # Output paths.
-    paths        = make_paths(reg=args.reg, date=args.date)
+    paths        = make_paths(reg=args.reg)
     path_out     = paths[f"fordata_ran_{args.reg}"]
     path_combined = paths["fordata_ran"]
     path_out.parent.mkdir(parents=True, exist_ok=True)
