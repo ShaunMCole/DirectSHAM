@@ -51,7 +51,7 @@ DATA_DIR = Path("/global/cfs/cdirs/desi/users/smcole/DirectSHAM")
 
 # Date/version tags used throughout the pipeline.  Changing these here
 # updates all downstream filenames automatically.
-DATA_DATE     = "6thOct"
+DATA_DATE     = "16thNov"
 LSS_VERSION   = "v2.1"
 DATA_DATE_DIR = DATA_DIR / DATA_DATE   # root for all date-specific files
 
@@ -94,7 +94,7 @@ SELECTION = {
         "faint":  19.54,   # BGS apparent-magnitude faint limit in the North
         "bright":  0.0,    # BGS apparent-magnitude bright limit
         "zmin":    0.01,
-        "zmax":    0.50,
+        "zmax":    0.60,
         "area":   _AREA_N, # sky area as fraction of full sphere
         "Qevol":   0.78,   # luminosity evolution parameter (same as Qr)
         "Qr":      0.78,   # r-band evolution correction coefficient
@@ -106,7 +106,7 @@ SELECTION = {
         "faint":  19.50,   # BGS apparent-magnitude faint limit in the South
         "bright":  0.0,
         "zmin":    0.01,
-        "zmax":    0.50,
+        "zmax":    0.60,
         "area":   _AREA_S,
         "Qevol":   0.78,
         "Qr":      0.78,
@@ -209,7 +209,7 @@ LIGHTCONE_SHELLS = [
     (45, 0.19, 0.10, 0.25),
     (43, 0.30, 0.25, 0.40),
     (41, 0.43, 0.40, 0.45),
-    (40, 0.49, 0.45, 0.50),
+    (40, 0.49, 0.45, 0.60),
 ]
 
 # Directory template for a lightcone model (sits alongside MODEL_DIR_TEMPLATE
