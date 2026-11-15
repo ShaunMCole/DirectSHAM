@@ -547,7 +547,7 @@ def main():
     # 5. If both regions now exist, concatenate into combined N+S file
     # -------------------------------------------------------------------------
     other_reg  = 'S' if args.reg == 'N' else 'N'
-    paths_other = make_paths(reg=other_reg, date=args.date)
+    paths_other = make_paths(reg=other_reg)
     path_other  = paths_other[f"fordata_ran_{other_reg}"]
 
     if path_other.exists():
