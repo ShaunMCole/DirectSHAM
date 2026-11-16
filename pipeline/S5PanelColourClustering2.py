@@ -27,10 +27,10 @@ from pycorr import TwoPointCorrelationFunction
 # =============================================================================
 
 DATA_DATE_DIR = Path(
-    "/global/cfs/cdirs/desi/users/smcole/DirectSHAM/6thOct"
+    "/global/cfs/cdirs/desi/users/smcole/DirectSHAM/16thNov"
 )
 MODEL_DIR = DATA_DATE_DIR / (
-    "N_neigh_lum50/seed000_sig_lgv0.18_0.30_fc0.00_al0.00"
+    "N_neigh_lum50/seed000_sig_lgv0.18_0.30_fc0.00_al0.02"
 )
 OUT_STEM = Path(__file__).resolve().parent / "S5PanelColourClustering2"
 
