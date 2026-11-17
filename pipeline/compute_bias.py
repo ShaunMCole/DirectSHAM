@@ -214,9 +214,9 @@ def get_median_redshift(mr_cut, zmin, zmax, subset=''):
 
     mask = (z >= zmin) & (z <= zmax) & (mr <= mr_cut)
     if subset == 'red':
-        mask &= (gmr >= 0.6)
+        mask &= (gmr >= 0.21 - 0.03 * mr)
     elif subset == 'blue':
-        mask &= (gmr < 0.6)
+        mask &= (gmr < 0.21 - 0.03 * mr)
 
     if mask.sum() == 0:
         print(f"  WARNING: no galaxies found for median z computation, using midpoint")
@@ -256,9 +256,9 @@ def get_halo_properties(mr_cut, zmin, zmax, subset=''):
 
     mask = (z >= zmin) & (z <= zmax) & (mr <= mr_cut)
     if subset == 'red':
-        mask &= (gmr >= 0.6)
+        mask &= (gmr >= 0.21 - 0.03 * mr)
     elif subset == 'blue':
-        mask &= (gmr < 0.6)
+        mask &= (gmr < 0.21 - 0.03 * mr)
 
     if mask.sum() == 0:
         return np.nan, np.nan, np.nan
