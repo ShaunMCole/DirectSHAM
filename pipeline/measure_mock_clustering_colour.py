@@ -152,8 +152,8 @@ def apply_cuts(infile, outfile, mr_cut, zmin, zmax, colour, log, is_random=False
     if 'ABSMAG_RP1' in data.colnames:
         mask &= (data['ABSMAG_RP1'] < mr_cut)
 
-    # Colour cut — applied to mock galaxies only, not randoms
-    if not is_random and 'REST_GMR_0P1' in data.colnames:
+    # Colour cut — applied to both galaxies and randoms
+    if 'REST_GMR_0P1' in data.colnames:
         mask &= colour_mask(data, colour)
 
     data_cut = data[mask]
@@ -244,7 +244,6 @@ def main():
                     ran_path,
                     basedir / f"BGS_BRIGHT_{cap}_0_clustering.ran.fits",
                     args.mr_cut, args.zmin, args.zmax, colour, log,
-                    is_random=True,
                 )
 
             cmd = [

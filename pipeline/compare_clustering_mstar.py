@@ -29,6 +29,8 @@ from config import (DATA_DATE_DIR,
 # Samples
 # =============================================================================
 
+DATA_CLUSTERING_DIR = Path("/global/cfs/cdirs/desi/users/smcole/DirectSHAM/6thOct/clustering/data")
+
 SAMPLES = [
     dict(cig_cut=11.10, fsf_cut=11.45, zmin=0.02, zmax=0.42),
     dict(cig_cut=10.60, fsf_cut=10.95, zmin=0.02, zmax=0.34),
@@ -72,13 +74,13 @@ def parse_args():
 
 def data_npy(sample_type, cut, zmin, zmax):
     tag = f"M{sample_type}{cut}_z{zmin:.2f}-{zmax:.2f}"
-    smu = DATA_DATE_DIR / "clustering" / "data" / tag / "smu"
+    smu = DATA_CLUSTERING_DIR / tag / "smu"
     pat = (f"allcounts_BGS_BRIGHT_GCcomb_{zmin:.2f}_{zmax:.2f}"
            f"_pip_angular_bitwise_log_njack{DATA_NJACK}_nran1_split20.npy")
     return smu / pat
 
 def mock_npy(sample_type, cut, zmin, zmax, paths):
-    tag = f"M{sample_type}{cut}_z{zmin:.2f}-{zmax:.2f}"
+    tag = f"M{sample_type}{cut}_z{zmin:.3f}-{zmax:.3f}"
     smu = Path(paths["model_dir"]) / "clustering" / tag / "smu"
     pat = (f"allcounts_BGS_BRIGHT_GCcomb_{zmin:.2f}_{zmax:.2f}"
            f"_default_log_njack0_nran1_split20.npy")
