@@ -108,10 +108,11 @@ def parse_args():
 # Sample selection
 # =============================================================================
 
-def apply_cuts(infile, outfile, mr_cut, zmin, zmax, is_dat, log):
+def apply_cuts(infile, outfile, mr_cut, zmin, zmax, log):
     """
     Apply redshift and absolute magnitude cuts to a catalogue and write
     the trimmed version to outfile in the format xirunpc.py expects.
+    Same cuts applied to both data and random catalogues.
     """
     log.info(f"Reading {infile}")
     data = Table(fitsio.read(str(infile)))
@@ -178,14 +179,13 @@ def main():
     log.info("=== Step 1: Applying sample selection cuts ===")
 
     pairs = [
-        (DAT_NGC, basedir / "BGS_BRIGHT_NGC_clustering.dat.fits",     True),
-        (DAT_SGC, basedir / "BGS_BRIGHT_SGC_clustering.dat.fits",     True),
-        (RAN_NGC, basedir / "BGS_BRIGHT_NGC_0_clustering.ran.fits",   False),
-        (RAN_SGC, basedir / "BGS_BRIGHT_SGC_0_clustering.ran.fits",   False),
+        (DAT_NGC, basedir / "BGS_BRIGHT_NGC_clustering.dat.fits"),
+        (DAT_SGC, basedir / "BGS_BRIGHT_SGC_clustering.dat.fits"),
+        (RAN_NGC, basedir / "BGS_BRIGHT_NGC_0_clustering.ran.fits"),
+        (RAN_SGC, basedir / "BGS_BRIGHT_SGC_0_clustering.ran.fits"),
     ]
-    for infile, outfile, is_dat in pairs:
-        apply_cuts(infile, outfile, args.mr_cut, args.zmin, args.zmax,
-                   is_dat, log)
+    for infile, outfile in pairs:
+        apply_cuts(infile, outfile, args.mr_cut, args.zmin, args.zmax, log)
 
     # -------------------------------------------------------------------------
     # Step 2: Symlink parent catalogues for angular upweighting

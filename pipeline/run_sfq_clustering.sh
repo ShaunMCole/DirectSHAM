@@ -4,7 +4,7 @@
 #
 # Must be run on a compute node:
 #   salloc --nodes=1 --qos=interactive --constraint=cpu \
-#          --account=desi --mem=128GB --time=08:00:00
+#          --account=desi --mem=400GB --time=08:00:00
 #
 # Usage:
 #   bash pipeline/run_sfq_clustering.sh [data|mock|both]
@@ -16,6 +16,7 @@ set -euo pipefail
 MODE=${1:-both}
 SIG_LGV_REF=0.18
 SIG_LGV_SLOPE=0.30
+ALPHA=0.02
 
 # CIGALE cut, zmax pairs
 SAMPLES=(
@@ -59,7 +60,8 @@ for SAMPLE in "${SAMPLES[@]}"; do
                 --zmin 0.02 --zmax ${ZMAX} \
                 --sfq ${SFQ} \
                 --sig_lgv_ref ${SIG_LGV_REF} \
-                --sig_lgv_slope ${SIG_LGV_SLOPE}
+                --sig_lgv_slope ${SIG_LGV_SLOPE} \
+                --alpha ${ALPHA}
         fi
 
     done

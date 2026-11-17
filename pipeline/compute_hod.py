@@ -23,8 +23,8 @@ import fitsio
 # =============================================================================
 
 MODEL_DIR = Path(
-    "/global/cfs/cdirs/desi/users/smcole/DirectSHAM/6thOct/N_neigh_lum50"
-    "/seed000_sig_lgv0.18_0.30_fc0.00_al0.00"
+    "/global/cfs/cdirs/desi/users/smcole/DirectSHAM/16thNov/N_neigh_lum50"
+    "/seed000_sig_lgv0.18_0.30_fc0.00_al0.02"
 )
 
 MOCK_CATS = [
@@ -36,6 +36,8 @@ CHECKPOINT_CATS = [
     MODEL_DIR / "subhalos_N_70.0_N_neigh_vpeak1000.fits",
     MODEL_DIR / "subhalos_S_70.0_N_neigh_vpeak1000.fits",
 ]
+# Note: checkpoint files are named subhalos_{N,S}_70.0_N_neigh_vpeak1000.fits
+# in the model directory. Verify these exist for the 16thNov model before running.
 
 OUT_STEM = Path(__file__).resolve().parent / "hod"
 
