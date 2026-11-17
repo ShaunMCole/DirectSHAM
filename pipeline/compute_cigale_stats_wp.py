@@ -106,11 +106,11 @@ if not _HAVE_NBODYKIT:
 # =============================================================================
 
 NEW_BASE = Path(
-    "/global/cfs/cdirs/desi/users/smcole/DirectSHAM/6thOct"
+    "/global/cfs/cdirs/desi/users/smcole/DirectSHAM/16thNov"
 )
 MODEL_DIR = (
     NEW_BASE / "N_neigh_lum50"
-    / "seed000_sig_lgv0.18_0.30_fc0.00_al0.00"
+    / "seed000_sig_lgv0.18_0.30_fc0.00_al0.02"
 )
 DATA_CLUSTERING_BASE = NEW_BASE / "clustering" / "data"
 MOCK_CLUSTERING_BASE = MODEL_DIR / "clustering"
