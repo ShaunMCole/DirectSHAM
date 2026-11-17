@@ -100,7 +100,7 @@ OLD_MOCK_BASE = Path(
     "/global/cfs/cdirs/desi/users/smcole/OldDirectSHAM/clustering/mocks"
 )
 NEW_BASE = Path(
-    "/global/cfs/cdirs/desi/users/smcole/DirectSHAM/6thOct"
+    "/global/cfs/cdirs/desi/users/smcole/DirectSHAM/16thNov"
 )
 DATA_CLUSTERING_DIR = NEW_BASE / "clustering" / "data"
 
@@ -114,14 +114,14 @@ DATA_NJACK = 60
 
 # BGS data catalogues for computing median redshift
 DATA_CATS = [
-    NEW_BASE / "BGS_BRIGHT_6thOct_NGC.fits",
-    NEW_BASE / "BGS_BRIGHT_6thOct_SGC.fits",
+    NEW_BASE / "BGS_BRIGHT_16thNov_NGC.fits",
+    NEW_BASE / "BGS_BRIGHT_16thNov_SGC.fits",
 ]
 
 # Mock catalogues for halo mass and satellite fraction
 MOCK_MODEL_DIR = (
     NEW_BASE / "N_neigh_lum50"
-    / f"seed000_sig_lgv{0.18:.2f}_{0.30:.2f}_fc0.00_al0.00"
+    / f"seed000_sig_lgv{0.18:.2f}_{0.30:.2f}_fc0.00_al0.02"
 )
 MOCK_CATS = [
     MOCK_MODEL_DIR / "mock_NGC.fits",
@@ -243,8 +243,7 @@ def _load_mock_cache():
     # Determine sentinel value for centrals: most common pid value
     pids, counts = np.unique(_MOCK_CACHE['pid'], return_counts=True)
     _CENTRAL_PID = pids[np.argmax(counts)]
-    print(f"  Central sentinel pid = {_CENTRAL_PID} "
-          f"(occurs {counts.max()} times out of {len(_MOCK_CACHE)})")
+    pass  # sentinel determined
 
 def get_halo_properties(mr_cut, zmin, zmax, subset=''):
     """Return (median Mhost centrals, median Mhost satellites, satellite fraction)
@@ -271,13 +270,6 @@ def get_halo_properties(mr_cut, zmin, zmax, subset=''):
     median_mhost_cen = float(np.nanmedian(mhost[is_cen])) if is_cen.sum() > 0 else np.nan
     median_mhost_sat = float(np.nanmedian(mhost[is_sat])) if is_sat.sum() > 0 else np.nan
     sat_frac         = float(is_sat.sum() / mask.sum())
-    n_sat = is_sat.sum()
-    n_sat_nan = np.isnan(mhost[is_sat]).sum()
-    n_cen_nan = np.isnan(mhost[is_cen]).sum()
-    print(f"  Mhost NaN fraction: cen={n_cen_nan}/{is_cen.sum()} "
-          f"({100*n_cen_nan/max(is_cen.sum(),1):.2f}%), "
-          f"sat={n_sat_nan}/{n_sat} "
-          f"({100*n_sat_nan/max(n_sat,1):.2f}%)")
     return median_mhost_cen, median_mhost_sat, sat_frac
 
 # =============================================================================
@@ -308,7 +300,7 @@ def mock_file_new(mr_cut, zmin, zmax, ref, slope=0.0, subset=''):
     suffix     = f"_{subset}" if subset else ""
     model_dir  = (
         NEW_BASE / "N_neigh_lum50"
-        / f"seed000_sig_lgv{ref:.2f}_{slope:.2f}_fc0.00_al0.00"
+        / f"seed000_sig_lgv{ref:.2f}_{slope:.2f}_fc0.00_al0.02"
     )
     sample_dir = model_dir / "clustering" / f"Mr{mr_cut}_z{zmin:.2f}-{zmax:.2f}{suffix}"
     smu_dir    = sample_dir / "smu"

@@ -397,9 +397,10 @@ def plot_photometric(dat, mock, ran, reg, outdir, show, log):
     col_bins    = np.linspace(0.0,  1.5, 40)
     colors      = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red']
 
-    # --- Absolute magnitude distributions by redshift slice ---
+      # --- Absolute magnitude distributions by redshift slice ---
     fig, ax = plt.subplots(figsize=(5, 4))
-    for (zmin, zmax), c in zip(z_bins_plot, colors):
+    label_x = [-22.3, -20.8, -19.6, -18.4]   # approximate peak positions, high-z to low-z
+    for (zmin, zmax), c, lx in zip(reversed(z_bins_plot), colors, label_x):
         s_dat  = (dat['Z']  >= zmin) & (dat['Z']  < zmax)
         s_rand = (z_rand    >= zmin) & (z_rand    < zmax)
         s_mock = (mock['Z'] >= zmin) & (mock['Z'] < zmax)
@@ -408,8 +409,14 @@ def plot_photometric(dat, mock, ran, reg, outdir, show, log):
         ax.hist(m_rand[s_rand], bins=mag_bins, density=True,
                 histtype='step', color='red', lw=2, alpha=0.8)
         ax.hist(mock['ABSMAG_RP1'][s_mock], bins=mag_bins, density=True,
-                histtype='step', color='blue', ls='--', lw=2,
-                label=rf'${zmin:.2f}\leq z<{zmax:.2f}$')
+                histtype='step', color='blue', ls='--', lw=2)
+        # Place label above the peak of each distribution
+        s_all = (ran['Z'] >= zmin) & (ran['Z'] < zmax)
+        h, _ = np.histogram(ran['ABSMAG_RP1'][s_all], bins=mag_bins, density=True)
+        peak_height = h.max()
+        ax.text(lx, peak_height * 1.02,
+                rf'${zmin:.2f}\leq z<{zmax:.2f}$',
+                ha='center', va='bottom', fontsize=7)
     ax.set_xlabel(r'$M_r - 5\log h$');  ax.set_ylabel('Probability density')
     ax.set_xlim(-24, -14)
     handles = [mpatches.Patch(facecolor='lightgrey', label='BGS data'),

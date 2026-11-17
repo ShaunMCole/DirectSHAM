@@ -46,7 +46,7 @@ DEFAULT_MSTAR_CUTS    = [11.0, 10.5, 10.0, 9.5, 9.0]
 DEFAULT_MSTAR_CUTS_FSF = None   # defaults to same as --mstar_cuts if not set
 
 Z_MIN  = 0.02
-Z_MAX  = 0.50
+Z_MAX  = 0.60
 N_BINS = 48
 EPS    = 1e-25
 
@@ -111,7 +111,7 @@ def make_plot(z, mr, logm_cig, logm_fsf, weights, zbins, vol,
     cig_colors = plt.cm.Reds_r(  np.linspace(0.2, 0.7, len(mstar_cuts)))
     fsf_colors = plt.cm.Greens_r(np.linspace(0.2, 0.7, len(mstar_cuts_fsf)))
 
-    xlim = (Z_MIN, 0.50)
+    xlim = (Z_MIN, 0.60)
     ylim = (-4.0, -1.25)
 
     FSIZE   = 7
@@ -210,7 +210,7 @@ def parse_args():
                    help="Sky fraction for volume calculation (default: read from fordata random headers)")
     p.add_argument("--cat", type=Path, default=None,
                    help="Read from this augmented data catalogue instead of mock "
-                        "(e.g. BGS_BRIGHT_6thOct_augmented.fits). "
+                        "(e.g. BGS_BRIGHT_16thNov_augmented.fits). "
                         "NGC and SGC are read from a single file.")
     p.add_argument("--outfile", type=Path, default=None,
                    help="Override output file path")
