@@ -2,8 +2,15 @@
 # run_sig_lgv_scan.sh — Run mock construction and clustering for additional
 # sig_lgv values across all 5 magnitude-limited samples.
 #
+# WARNING: This script is for HISTORICAL USE ONLY — it was used to generate
+# the constant-scatter (single sig_lgv parameter) models for Fig 8.
+# It uses the OLD pipeline API (--sig_lgv, no --alpha, no slope) and the
+# OLD PYTHONPATH ($HOME/ShaunColeDESI). It is NOT compatible with the
+# current pipeline API and should NOT be used for new model runs.
+# For current pipeline runs use run_pipeline.sh or run_all_clustering.sh.
+#
 # Must be run on a compute node:
-#   salloc --nodes=1 --qos=interactive --constraint=cpu --account=desi --time=04:00:00
+#   salloc --nodes=1 --qos=interactive --constraint=cpu --account=desi --mem=400GB --time=04:00:00
 #
 # Then:
 #   cd ~/DirectSHAM/pipeline

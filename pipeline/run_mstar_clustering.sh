@@ -6,7 +6,7 @@
 #
 # Must be run on a compute node:
 #   salloc --nodes=1 --qos=interactive --constraint=cpu \
-#          --account=desi --mem=128GB --time=04:00:00
+#          --account=desi --mem=400GB --time=04:00:00
 #
 # Usage:
 #   bash pipeline/run_mstar_clustering.sh             # data + mock
@@ -17,7 +17,7 @@
 SIG_LGV_REF=0.18
 SIG_LGV_SLOPE=0.30
 F_COLOUR=0.00
-ALPHA=0.00
+ALPHA=0.02
 OBS_SEED=0
 NJACK=60
 
@@ -31,10 +31,6 @@ SAMPLES=(
     " 8.90   9.25  0.17"
 )
 
-SAMPLES=(
-    " 9.50   9.85  0.21"
-    " 8.90   9.25  0.17"
-)
 
 ZMIN=0.02
 MODE=${1:-"both"}   # data, mock, or both (default)
