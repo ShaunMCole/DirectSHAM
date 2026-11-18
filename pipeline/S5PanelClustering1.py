@@ -36,7 +36,9 @@ OLD_MOCK_BASE = Path(
 NEW_BASE = Path(
     "/global/cfs/cdirs/desi/users/smcole/DirectSHAM/6thOct"
 )
-DATA_CLUSTERING_DIR = NEW_BASE / "clustering" / "data"
+DATA_CLUSTERING_DIR = Path(
+    "/global/cfs/cdirs/desi/users/smcole/DirectSHAM/16thNov"
+) / "clustering" / "data"
 OUT_STEM = Path(__file__).resolve().parent / "S5PanelClustering1"
 
 DATA_NJACK = 60
@@ -118,6 +120,7 @@ def load_result(path):
     if not path.exists():
         print(f"WARNING: File not found: {path}")
         return None
+    print(f"Reading: {path}")
     return TwoPointCorrelationFunction.load(str(path))
 
 
