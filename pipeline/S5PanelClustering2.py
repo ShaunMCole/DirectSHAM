@@ -38,8 +38,8 @@ def parse_args():
     p.add_argument('--seed2_only', action='store_true',
                    help='If set with --seed2, show only seed2 mock (not seed000). '
                         'Useful to plot seed123 vs data without seed000 clutter.')
-    p.add_argument('--alpha', type=float, default=0.0,
-                   help='alpha_v value for the primary mock (default: 0.0).')
+    p.add_argument('--alpha', type=float, default=0.02,
+                   help='alpha_v value for the primary mock (default: 0.02).')
     p.add_argument('--alpha2', type=float, default=None,
                    help='If set, overplot a second mock with this alpha_v value '
                         '(e.g. --alpha2 0.2 to compare al0.00 vs al0.20). '
@@ -51,7 +51,7 @@ def parse_args():
 # =============================================================================
 
 DATA_DATE_DIR = Path(
-    "/global/cfs/cdirs/desi/users/smcole/DirectSHAM/6thOct"
+    "/global/cfs/cdirs/desi/users/smcole/DirectSHAM/16thNov"
 )
 
 DATA_CLUSTERING_DIR = DATA_DATE_DIR / "clustering" / "data"
@@ -121,6 +121,7 @@ def load_result(path):
     if not path.exists():
         print(f"WARNING: File not found: {path}")
         return None
+    print(f"Reading: {path}")
     return TwoPointCorrelationFunction.load(str(path))
 
 

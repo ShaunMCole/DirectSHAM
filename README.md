@@ -158,8 +158,12 @@ cuts gives wrong dN/dz and biased clustering.
 | `compare_clustering_sfq.py` | Fig. 16 | ξ₀ and ξ₂ for star-forming and quenched subsamples, four stellar mass bins (CIGALE sSFR) |
 | `S5PanelClustering2.py` (lightcone) | Fig. 17 | Lightcone mock ξ₀ and ξ₂ vs data, five luminosity bins |
 | `plot_lss_clustering.py` | Fig. 18 | LSS sample ξ₀ and ξ₂: data (black/grey), lightcone mock (red), cut-sky mock (blue) |
-| `compare_clustering.py` | — | Single-panel ξ₀ and ξ₂ for one or more mocks vs data; general-purpose diagnostic |
-| `compare_clustering_colour.py` | — | Flexible CLI-driven red/blue clustering comparison (diagnostic; paper uses `S5PanelColourClustering2.py`) |
+| `compare_clustering.py` | — | Single-panel ξ₀ and ξ₂ for one or more mocks vs data; takes explicit file paths — general-purpose diagnostic |
+| `compare_clustering_colour.py` | — | Flexible CLI-driven red/blue clustering comparison for bright samples (diagnostic; paper uses `S5PanelColourClustering2.py`) |
+| `compare_clustering_faint.py` | — | Five-panel ξ₀ and ξ₂ for faint samples (Mr<-19.5 to -17.5) with vpeak-dependent scatter models; uses `DATA_DATE_DIR` and `make_paths()`. Also appears in the filesystem as `compare_clustering_vpeak_scatter.py` (same file) |
+| `compare_clustering_colour_faint.py` | — | As `compare_clustering_faint.py` but red/blue colour split; uses `DATA_DATE_DIR` and `make_paths()` |
+| `compare_lss_selections.py` | — | Diagnostic: compares the LSS no-kcorr and pipeline absolute-magnitude sample definitions over 0.1<z<0.3; plots n(z), overlap fraction, and colour distributions |
+| `check_halo_completeness.py` | — | Diagnostic: checks whether each Uchuu halo file is self-contained with respect to parent-satellite relationships; run once after a new snapshot is downloaded |
 | `plot_cigale_bin_clustering.py` | — | s²ξ₀(s): data vs mock for all 19 KP CIGALE bins; 3×2 panel layout |
 | `plot_cigale_bin_wp.py` | — | w(r_p): data vs mock for all 19 KP CIGALE bins; 3×2 panel layout |
 | `compute_cigale_stats.py` | — | Bias from ξ₀(s), median halo masses and satellite fractions for all 19 KP CIGALE bins; outputs LaTeX table |
@@ -170,8 +174,11 @@ cuts gives wrong dN/dz and biased clustering.
 | Script | Node | Description |
 |--------|------|-------------|
 | `run_pipeline.sh` | compute | Runs checkpoint, mock construction, splitting and clustering for a single model across all magnitude samples |
-| `run_sfq_clustering.sh` | compute | Drives all 20 SF/passive clustering runs (5 samples × 2 splits × data+mock) |
-| `run_cigale_clustering.sh` | compute | Drives all 38 KP CIGALE bin clustering runs (19 bins × data+mock) |
+| `run_all_clustering.sh` | compute | Drives luminosity-threshold clustering for all 5 standard Mr samples (data + mock) |
+| `run_mstar_clustering.sh` | compute | Drives stellar mass threshold clustering for all 5 CIGALE and FSF samples (data + mock); 400GB |
+| `run_sfq_clustering.sh` | compute | Drives all 20 SF/passive clustering runs (5 samples × 2 splits × data+mock); 400GB |
+| `run_cigale_clustering.sh` | compute | Drives all 38 KP CIGALE bin clustering runs (19 bins × data+mock); 400GB |
+| `run_sig_lgv_scan.sh` | compute | **Historical only** — generates constant-σ_v models for Fig 8; uses old single-parameter API, not compatible with current pipeline |
 
 ## Scatter parametrisation
 
