@@ -297,23 +297,24 @@ def read_halolist_file_reps(file_path, randseed, columns, min_logMvir=10.4, min_
 
 
     # --- Vpeak cut ---
-    keep = (results['Vpeak'] >  min_Vpeak)
-    nkeep = np.sum(keep)
-    pkeep = 100 * nkeep / len(keep)
-    print(f'{shortname} Global Vpeak cut: keeping {nkeep}/{len(keep)} ({pkeep:.1f}%) entries')
-
+    ntot_vpeak = len(results['Vpeak'])
+    keep = (results['Vpeak'] > min_Vpeak)
+    nkeep_vpeak = int(np.sum(keep))
     for col in results:
         results[col] = results[col][keep]
-        
 
     # --- mass cut ---
+    ntot_mvir = len(results['Mvir_all'])
     keep = (results['Mvir_all'] > 10**min_logMvir)
-    nkeep = np.sum(keep)
-    pkeep = 100 * nkeep / len(keep)
-    print(f'{shortname} Mvir_all cut: keeping {nkeep}/{len(keep)} ({pkeep:.1f}%) entries')
-
+    nkeep_mvir = int(np.sum(keep))
     for col in results:
         results[col] = results[col][keep]
+
+    print(f'{shortname}: Vpeak ({100*nkeep_vpeak/ntot_vpeak:.1f}%)  '
+          f'Mvir ({100*nkeep_mvir/ntot_mvir:.1f}%)  '
+          f'final={nkeep_mvir:,}')
+
+
 
     
     # ------------------------------------------------------------
@@ -964,10 +965,17 @@ def pre_sort_subhalos(subhalos, N_neigh=100, sig_lgv_ref=0.0, sig_lgv_slope=0.0,
 
     # ------------------------------------------------------------------
     # Distance dependent trimming — element-wise, no sort needed
+    # Piecewise: original cubic polynomial below 1300 Mpc/h; above 1300
+    # a quadratic extension matching value and slope at the join point,
+    # rising more steeply to trim unusable high-distance subhalos.
     # ------------------------------------------------------------------
     start_time = time.time()
     dist  = subhalos['dist']
-    limit = ((6.5e-07 * dist - 9.02e-04) * dist + 0.486) * dist + 10.0
+    _d0, _v0, _slope0, _B = 1300.0, 545.5, 1.436, 0.01
+    orig  = ((6.5e-07 * dist - 9.02e-04) * dist + 0.486) * dist + 10.0
+    limit = np.where(dist <= _d0,
+                     orig,
+                     _v0 + _slope0 * (dist - _d0) + _B * (dist - _d0)**2)
     mask  = subhalos['Vpeak'] > limit
     subhalos['keep'] = mask
     end_time = time.time()

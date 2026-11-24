@@ -529,18 +529,42 @@ def plot_halo(mock, outdir, show, log):
     savefig(fig, outdir, 'vpeak_vs_absmag', show, log)
 
     # --- Vpeak vs distance ---
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.scatter(mock['dist'], mock['Vpeak'], s=0.2, color='green',
-               marker='.', rasterized=True, zorder=1)
-    # Overplot the hardcoded distance-dependent cut from MockCode.pre_sort_subhalos
     dist_arr = np.linspace(0, 1600, 200)
-    vpeak_cut = ((6.5e-7 * dist_arr - 9.02e-4) * dist_arr + 0.486) * dist_arr + 10.0
-    ax.plot(dist_arr, vpeak_cut, color='red', lw=2, label='Vpeak cut')
-    ax.set_xlabel('Comoving distance [Mpc/h]')
-    ax.set_ylabel(r'$V_\mathrm{peak}$ [km/s]')
-    ax.legend()
-    plt.tight_layout()
-    savefig(fig, outdir, 'vpeak_vs_distance', show, log)
+    poly = ((6.5e-7 * dist_arr - 9.02e-4) * dist_arr + 0.486) * dist_arr + 10.0
+    vpeak_cut_current = np.where(dist_arr > 1300.0, poly, 0.0)
+    vpeak_cut_old = poly  # original polynomial applied at all distances
+
+    # Candidate new curve: piecewise — original below 1300 Mpc/h,
+    # quadratic extension above matching value and slope at 1300
+    _d0, _v0, _slope0, _B = 1300.0, 545.5, 1.436, 0.01
+    vpeak_cut_candidate = np.where(
+        dist_arr <= _d0,
+        poly,
+        _v0 + _slope0 * (dist_arr - _d0) + _B * (dist_arr - _d0)**2
+    )
+
+    for yscale, ylim, suffix in [
+        ('linear', None,          'vpeak_vs_distance'),
+        ('log',    (50, 20000),   'vpeak_vs_distance_log'),
+        ('linear', (0, 2000),     'vpeak_vs_distance_zoom'),
+    ]:
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.scatter(mock['dist'], mock['Vpeak'], s=0.2, color='green',
+                   marker='.', rasterized=True, zorder=1)
+        ax.plot(dist_arr, vpeak_cut_current, color='red', lw=2,
+                label='Vpeak cut (current)')
+        ax.plot(dist_arr, vpeak_cut_old, color='red', lw=1.5, ls='--',
+                label='Vpeak cut (original)')
+        ax.plot(dist_arr, vpeak_cut_candidate, color='blue', lw=1.5, ls='-',
+                label=r'Vpeak cut (candidate: piecewise, $B=0.01$)')
+        ax.set_xlabel('Comoving distance [Mpc/h]')
+        ax.set_ylabel(r'$V_\mathrm{peak}$ [km/s]')
+        ax.set_yscale(yscale)
+        if ylim is not None:
+            ax.set_ylim(ylim)
+        ax.legend(fontsize=8, loc='upper left')
+        plt.tight_layout()
+        savefig(fig, outdir, suffix, show, log)
 
     # --- Mpeak_Scale vs colour ---
     fig, ax = plt.subplots(figsize=(6, 5))
