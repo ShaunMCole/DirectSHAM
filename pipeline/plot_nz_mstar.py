@@ -105,7 +105,9 @@ def nz_scatter_mr(ax, z, mr, threshold, weights, zbins, vol, color, label,
 
 
 def make_plot(z, mr, logm_cig, logm_fsf, weights, zbins, vol,
-              mr_cuts, mstar_cuts, mstar_cuts_fsf, outfile):
+              mr_cuts, mstar_cuts, mstar_cuts_fsf, outfile,
+              z_mock=None, logm_cig_mock=None, logm_fsf_mock=None,
+              weights_mock=None, vol_mock=None):
 
     mr_colors  = plt.cm.Blues_r( np.linspace(0.2, 0.7, len(mr_cuts)))
     cig_colors = plt.cm.Reds_r(  np.linspace(0.2, 0.7, len(mstar_cuts)))
@@ -133,6 +135,28 @@ def make_plot(z, mr, logm_cig, logm_fsf, weights, zbins, vol,
     for cut, col in zip(mstar_cuts_fsf, fsf_colors):
         nz_line(ax, z, logm_fsf, cut, weights, zbins, vol, col, label=None)
 
+    # Mock CIGALE M* thresholds — same colours as data but dashed
+    if z_mock is not None and logm_cig_mock is not None:
+        vm = vol_mock if vol_mock is not None else vol
+        zcen = 0.5 * (zbins[:-1] + zbins[1:])
+        for cut, col in zip(mstar_cuts, cig_colors):
+            mask = np.isfinite(logm_cig_mock) & (logm_cig_mock >= cut)
+            h, _ = np.histogram(z_mock[mask], bins=zbins,
+                                weights=weights_mock[mask] if weights_mock is not None else None)
+            nz = np.log10(h / vm + EPS)
+            ax.plot(zcen, nz, color=col, lw=0.8, ls='--')
+
+    # Mock FSF M* thresholds — same colours as data but dashed
+    if z_mock is not None and logm_fsf_mock is not None:
+        vm = vol_mock if vol_mock is not None else vol
+        zcen = 0.5 * (zbins[:-1] + zbins[1:])
+        for cut, col in zip(mstar_cuts_fsf, fsf_colors):
+            mask = np.isfinite(logm_fsf_mock) & (logm_fsf_mock >= cut)
+            h, _ = np.histogram(z_mock[mask], bins=zbins,
+                                weights=weights_mock[mask] if weights_mock is not None else None)
+            nz = np.log10(h / vm + EPS)
+            ax.plot(zcen, nz, color=col, lw=0.8, ls='--')
+
     # -------------------------------------------------------------------
     # Bespoke legend: header + 5 data rows
     # Header:  ●  Mr          CIGALE   FSF
@@ -157,6 +181,11 @@ def make_plot(z, mr, logm_cig, logm_fsf, weights, zbins, vol,
     ax.text(x_fsf + 0.025, y0, "FSF",   transform=ax.transAxes,
             ha="center", va="top", fontsize=fs, color=fsf_colors[0],
             fontstyle="italic")
+    if z_mock is not None:
+        ax.plot([], [], 'k-',  lw=0.8, label='data')
+        ax.plot([], [], 'k--', lw=0.8, label='mock')
+        ax.legend(fontsize=fs, frameon=False, loc='lower left',
+                  handlelength=1.5, handletextpad=0.4)
 
     for i, (mr_lbl, mr_col, cig_cut, cig_col, fsf_cut, fsf_col) in enumerate(
             zip(mr_labels, mr_colors, mstar_cuts, cig_colors,
@@ -212,6 +241,10 @@ def parse_args():
                    help="Read from this augmented data catalogue instead of mock "
                         "(e.g. BGS_BRIGHT_16thNov_augmented.fits). "
                         "NGC and SGC are read from a single file.")
+    p.add_argument("--mock_cat", action="store_true", default=False,
+                   help="If set alongside --cat, also load the mock augmented "
+                        "catalogues and overplot mock n(z) as dashed lines "
+                        "in the same colours.")
     p.add_argument("--outfile", type=Path, default=None,
                    help="Override output file path")
     return p.parse_args()
@@ -303,8 +336,57 @@ def main():
 
     mstar_cuts_fsf = args.mstar_cuts_fsf if args.mstar_cuts_fsf is not None \
                      else args.mstar_cuts
+
+    # Optionally load mock augmented catalogues for overplotting
+    z_mock = logm_cig_mock = weights_mock = vol_mock = None
+    if args.mock_cat and args.cat is not None:
+        mock_tables = []
+        mock_fsky = 0.0
+        for reg in ("NGC", "SGC"):
+            mock_path = Path(paths[f"mock_{reg}"])
+            # Stellar masses propagated directly into mock_NGC/SGC.fits
+            aug_path = mock_path.with_name(mock_path.stem + "_augmented.fits")
+            if not aug_path.exists():
+                aug_path = mock_path   # fall back to main mock file
+            if aug_path.exists():
+                logging.info("Reading mock %s ...", aug_path)
+                t = Table.read(str(aug_path), format="fits")
+                cols = [c for c in ["Zobs", "Z", "LOGM", "LOGMSTAR", "WEIGHT"] if c in t.colnames]
+                if "LOGM" not in t.colnames:
+                    logging.warning("LOGM column not found in %s — CIGALE cuts will not work", aug_path)
+                if "LOGMSTAR" not in t.colnames:
+                    logging.warning("LOGMSTAR column not found in %s — FSF cuts will not work", aug_path)
+                mock_tables.append(t[cols])
+                # Get FSKY from formock random header
+                ran_path = Path(paths[f"formock_ran_{reg}"])
+                if ran_path.exists():
+                    from astropy.io.fits import getheader as _getheader
+                    mock_fsky += _getheader(str(ran_path), ext=1).get("FSKY", 0.0)
+            else:
+                logging.warning("Mock augmented not found: %s", aug_path)
+        if mock_tables:
+            mock_data = vstack(mock_tables)
+            logging.info("Mock combined: %d rows", len(mock_data))
+            z_col_mock = "Zobs" if "Zobs" in mock_data.colnames else "Z"
+            z_mock = np.asarray(mock_data[z_col_mock], dtype=float)
+            logm_cig_mock = np.asarray(mock_data["LOGM"],     dtype=float)
+            logm_fsf_mock = np.asarray(mock_data["LOGMSTAR"], dtype=float) \
+                            if "LOGMSTAR" in mock_data.colnames else None
+            weights_mock = (np.asarray(mock_data["WEIGHT"], dtype=float)
+                            if "WEIGHT" in mock_data.colnames else None)
+            if mock_fsky > 0:
+                dc_mock = cosmo.comoving_distance(zbins).value
+                vol_mock = (4.0 * np.pi * mock_fsky / 3.0) * \
+                           (dc_mock[1:]**3 - dc_mock[:-1]**3)
+                logging.info("Mock FSKY: %.6f", mock_fsky)
+            else:
+                vol_mock = vol  # fall back to data volume
+
     make_plot(z, mr, logm_cig, logm_fsf, weights, zbins, vol,
-              args.mr_cuts, args.mstar_cuts, mstar_cuts_fsf, outfile)
+              args.mr_cuts, args.mstar_cuts, mstar_cuts_fsf, outfile,
+              z_mock=z_mock, logm_cig_mock=logm_cig_mock,
+              logm_fsf_mock=logm_fsf_mock,
+              weights_mock=weights_mock, vol_mock=vol_mock)
 
     logging.info("Done.")
 

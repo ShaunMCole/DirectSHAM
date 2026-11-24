@@ -44,6 +44,11 @@ def parse_args():
                    help='If set, overplot a second mock with this alpha_v value '
                         '(e.g. --alpha2 0.2 to compare al0.00 vs al0.20). '
                         'Uses obs_seed=0 for both unless --seed2 is also set.')
+    p.add_argument('--slope', type=float, default=0.30,
+                   help='sig_lgv_slope for the primary mock (default: 0.30).')
+    p.add_argument('--slope2', type=float, default=None,
+                   help='If set, use this sig_lgv_slope for the second mock '
+                        '(default: same as --slope).')
     return p.parse_args()
 
 # =============================================================================
@@ -85,9 +90,9 @@ COL_XI2_MOCK2 = '#aec7e8'
 # Path helpers
 # =============================================================================
 
-def model_dir(obs_seed, alpha=0.0):
+def model_dir(obs_seed, alpha=0.0, slope=0.30):
     return DATA_DATE_DIR / (
-        f"N_neigh_lum50/seed{obs_seed:03d}_sig_lgv0.18_0.30_fc0.00_al{alpha:.2f}"
+        f"N_neigh_lum50/seed{obs_seed:03d}_sig_lgv0.18_{slope:.2f}_fc0.00_al{alpha:.2f}"
     )
 
 
@@ -101,10 +106,10 @@ def data_file(mr_cut, zmin, zmax):
     return smu_dir / pattern
 
 
-def mock_file(mr_cut, zmin, zmax, obs_seed=0, lightcone=False, alpha=0.0):
+def mock_file(mr_cut, zmin, zmax, obs_seed=0, lightcone=False, alpha=0.0, slope=0.30):
     lc_tag     = "_lightcone" if lightcone else ""
     sample_tag = f"Mr{mr_cut}_z{zmin:.2f}-{zmax:.2f}{lc_tag}"
-    smu_dir    = model_dir(obs_seed, alpha=alpha) / "clustering" / sample_tag / "smu"
+    smu_dir    = model_dir(obs_seed, alpha=alpha, slope=slope) / "clustering" / sample_tag / "smu"
     pattern    = (
         f"allcounts_BGS_BRIGHT_GCcomb_{zmin:.2f}_{zmax:.2f}_default"
         f"_log_njack0_nran1_split20.npy"
@@ -167,10 +172,10 @@ def compute_chi2(s_dat, xi_dat, err_dat, s_mock, xi_mock,
 
 
 def plot_mock(ax, mr, z0, z1, obs_seed, lightcone, col0, col2,
-              label0, label2, s_d, xi_dat_g, err_dat_g, ells, alpha=0.0):
+              label0, label2, s_d, xi_dat_g, err_dat_g, ells, alpha=0.0, slope=0.30):
     """Load and plot one mock; return legend handles and chi2/dof string."""
     result = load_result(mock_file(mr, z0, z1, obs_seed=obs_seed,
-                                   lightcone=lightcone, alpha=alpha))
+                                   lightcone=lightcone, alpha=alpha, slope=slope))
     handles = []
     chi2_str = '?'
     if result is not None and s_d is not None:
@@ -200,9 +205,12 @@ def main():
     only_tag  = "_only" if args.seed2_only else ""
     al_tag    = f"_al{args.alpha:.2f}"
     al2_tag   = f"_vs_al{args.alpha2:.2f}" if args.alpha2 is not None else ""
+    sl_tag    = f"_sl{args.slope:.2f}" if args.slope != 0.30 else ""
+    slope2    = args.slope2 if args.slope2 is not None else args.slope
+    sl2_tag   = f"_vs_sl{slope2:.2f}" if args.slope2 is not None else ""
     out_stem  = (
         Path(__file__).resolve().parent
-        / f"S5PanelClustering2{lc_tag}{al_tag}{al2_tag}{seed2_tag}{only_tag}"
+        / f"S5PanelClustering2{lc_tag}{al_tag}{al2_tag}{sl_tag}{sl2_tag}{seed2_tag}{only_tag}"
     )
 
     ells = [0, 2]
@@ -267,7 +275,7 @@ def main():
                 label0=fr'{seed1_label} $\xi_0$',
                 label2=fr'{seed1_label} $\xi_2$',
                 s_d=s_d, xi_dat_g=xi_dat_g, err_dat_g=err_dat_g, ells=ells,
-                alpha=args.alpha,
+                alpha=args.alpha, slope=args.slope,
             )
             legend_handles.extend(h1)
 
@@ -286,7 +294,7 @@ def main():
                 label0=fr'{seed2_label} $\xi_0$',
                 label2=fr'{seed2_label} $\xi_2$',
                 s_d=s_d, xi_dat_g=xi_dat_g, err_dat_g=err_dat_g, ells=ells,
-                alpha=alpha_2,
+                alpha=alpha_2, slope=slope2,
             )
             legend_handles.extend(h2)
 

@@ -422,6 +422,15 @@ def setup_logging(script_name, log_dir=None, level=logging.INFO):
     log.setLevel(level)
     log.addHandler(file_handler)
     log.addHandler(stdout_handler)
+    log.propagate = False  # prevent messages appearing twice via root logger
+
+    # Also configure the root logger so that modules using
+    # logging.getLogger() (e.g. MockCode.py) send their messages to the
+    # same handlers.
+    root = logging.getLogger()
+    root.setLevel(level)
+    root.addHandler(file_handler)
+    root.addHandler(stdout_handler)
 
     log.info(f"Log file: {log_file}")
     return log

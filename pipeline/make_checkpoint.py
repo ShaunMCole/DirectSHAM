@@ -28,7 +28,7 @@ from pathlib import Path
 
 import numpy as np
 from astropy.table import Table
-from scipy.interpolate import interp1d
+
 import fitsio
 from desimodel.footprint import is_point_in_desi
 
@@ -96,45 +96,49 @@ def add_sky_coords(subhalos, obs_seed, log):
         phi, theta, psi = mc.random_euler_angles(seed=obs_seed)
         log.info(f'Euler angles[radians]: phi={phi:.4f}  theta={theta:.4f}  psi={psi:.4f}')
         R = mc.euler_rotation_matrix(phi, theta, psi)
-        vxr = R[0,0]*subhalos['vx'] + R[0,1]*subhalos['vy'] + R[0,2]*subhalos['vz']
-        vyr = R[1,0]*subhalos['vx'] + R[1,1]*subhalos['vy'] + R[1,2]*subhalos['vz']
-        vzr = R[2,0]*subhalos['vx'] + R[2,1]*subhalos['vy'] + R[2,2]*subhalos['vz']
+        R64 = R.astype(np.float64)
+        vxr, vyr, vzr = mc._rotate_coords_parallel(
+            np.asarray(subhalos['vx'], dtype=np.float32),
+            np.asarray(subhalos['vy'], dtype=np.float32),
+            np.asarray(subhalos['vz'], dtype=np.float32), R64)
         subhalos['vx'] = vxr; subhalos['vy'] = vyr; subhalos['vz'] = vzr
         del vxr, vyr, vzr
-        xr = R[0,0]*subhalos['x'] + R[0,1]*subhalos['y'] + R[0,2]*subhalos['z']
-        yr = R[1,0]*subhalos['x'] + R[1,1]*subhalos['y'] + R[1,2]*subhalos['z']
-        zr = R[2,0]*subhalos['x'] + R[2,1]*subhalos['y'] + R[2,2]*subhalos['z']
+        xr, yr, zr = mc._rotate_coords_parallel(
+            np.asarray(subhalos['x'], dtype=np.float64),
+            np.asarray(subhalos['y'], dtype=np.float64),
+            np.asarray(subhalos['z'], dtype=np.float64), R64)
         subhalos['x'] = xr; subhalos['y'] = yr; subhalos['z'] = zr
-        del xr, yr, zr
+        del xr, yr, zr, R64
         log.info(f'Rotation done in {time.time()-t0:.1f}s')
     else:
         log.info('obs_seed=0: no rotation applied.')
 
     t0 = time.time()
-    dist = np.sqrt(subhalos['x']**2 + subhalos['y']**2 + subhalos['z']**2)
-    subhalos['dist'] = dist
-    subhalos['DEC']  = np.degrees(np.arcsin(subhalos['z'] / dist))
-    subhalos['RA']   = np.degrees(np.arctan2(subhalos['y'], subhalos['x'])) % 360.0
+    # Build interpolation grid once — passed to numba as plain arrays
+    z_grid  = np.linspace(0.0, 1.0, 10000)
+    Dc_grid = cosmo_uchuu.comoving_distance(z_grid).value
 
-    c_light = 299792.458
-    vr_c = (
-        subhalos['x']*subhalos['vx'] +
-        subhalos['y']*subhalos['vy'] +
-        subhalos['z']*subhalos['vz']
-    ) / (c_light * dist)
+    dist, ra, dec, zu, zobs = mc.compute_sky_coords(
+        np.asarray(subhalos['x'],  dtype=np.float64),
+        np.asarray(subhalos['y'],  dtype=np.float64),
+        np.asarray(subhalos['z'],  dtype=np.float64),
+        np.asarray(subhalos['vx'], dtype=np.float32),
+        np.asarray(subhalos['vy'], dtype=np.float32),
+        np.asarray(subhalos['vz'], dtype=np.float32),
+        Dc_grid, z_grid,
+    )
+    del z_grid, Dc_grid
+
+    subhalos['dist'] = dist
+    subhalos['RA']   = ra
+    subhalos['DEC']  = dec
+    subhalos['Zu']   = zu
+    subhalos['Zobs'] = zobs
+    del dist, ra, dec, zu, zobs
 
     for col in ('vx', 'vy', 'vz'):
         subhalos.remove_column(col)
     gc.collect()
-
-    # conc (= Rvir/rs) is not computed as Rvir and rs are not in UCHUU_COLUMNS.
-
-    z_grid  = np.linspace(0.0, 1.0, 10000)
-    Dc_grid = cosmo_uchuu.comoving_distance(z_grid).value
-    z_of_Dc = interp1d(Dc_grid, z_grid, bounds_error=False, fill_value='extrapolate')
-    subhalos['Zu']   = z_of_Dc(dist).astype(np.float32)
-    subhalos['Zobs'] = ((1.0 + subhalos['Zu']) * (1.0 + vr_c) - 1.0).astype(np.float32)
-    del z_grid, Dc_grid, z_of_Dc, vr_c, dist
 
     log.info(f'Sky coords + redshifts done in {time.time()-t0:.1f}s')
     return subhalos
@@ -241,10 +245,13 @@ def main():
         yobs=yobs,
         zobs=zobs,
     )
-    log.info(f'Read {len(subhalos):,} subhalos in {time.time()-t0:.1f}s')
+    log.info(f'Read {len(subhalos):,} subhalos in {time.time()-t0:.1f}s '
+             f'(parallel read + concatenation + Table construction)')
 
     subhalos = add_sky_coords(subhalos, args.obs_seed, log)
+    t0 = time.time()
     subhalos = mc.make_all_columns_contiguous(subhalos)
+    log.info(f'make_all_columns_contiguous done in {time.time()-t0:.1f}s')
 
     subhalos = mc.pre_sort_subhalos(
         subhalos,
@@ -267,6 +274,18 @@ def main():
     for reg in regs:
         log.info(f'=== Region {reg} ===')
         subhalos_reg = apply_sky_mask(subhalos, reg, log)
+
+        # Apply the sort index now — the region table is ~8-18M rows so this
+        # is cheap (~1-2s) compared to sorting the full 2.1B row table.
+        t0 = time.time()
+        sort_idx_reg = np.asarray(subhalos_reg['sort_idx'])
+        # sort_idx_reg contains global ranks; we need the local argsort
+        # i.e. reorder rows so that sort_idx_reg is ascending (rank order)
+        local_order = np.argsort(sort_idx_reg, kind='stable')
+        subhalos_reg = subhalos_reg[local_order]
+        subhalos_reg.remove_column('sort_idx')
+        log.info(f'Region {reg}: physical sort applied in {time.time()-t0:.1f}s')
+
         write_checkpoint(subhalos_reg, reg, args, redshift, out_paths[reg], log)
         del subhalos_reg
         gc.collect()

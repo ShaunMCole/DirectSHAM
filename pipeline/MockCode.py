@@ -1,6 +1,7 @@
 #Functions used in the mock creation pipeline MockVpeakZpeak.ipynb
 from numba import njit,prange
 import multiprocessing
+import logging
 import os
 import h5py
 import numpy as np
@@ -12,6 +13,94 @@ import catalogue_analysis as ca
 import fitsio
 from desimodel.footprint import is_point_in_desi
 import matplotlib.pyplot as plt
+
+log = logging.getLogger()  # root logger — inherits handlers from make_checkpoint.py
+
+from concurrent.futures import ThreadPoolExecutor
+
+# =============================================================================
+# Parallel argsort descending — used in pre_sort_subhalos to avoid full-table
+# physical sort.  Only the Vpeak array is sorted; the table is reordered only
+# at write time when it has been trimmed to ~8-18M rows.
+# =============================================================================
+
+@njit
+def _numba_merge_desc(va, ia, vb, ib):
+    """O(n) merge of two descending-sorted index arrays using numba."""
+    na, nb = len(va), len(vb)
+    out_v = np.empty(na + nb, dtype=va.dtype)
+    out_i = np.empty(na + nb, dtype=ia.dtype)
+    i = j = k = 0
+    while i < na and j < nb:
+        if va[i] >= vb[j]:
+            out_v[k] = va[i]; out_i[k] = ia[i]; i += 1
+        else:
+            out_v[k] = vb[j]; out_i[k] = ib[j]; j += 1
+        k += 1
+    while i < na:
+        out_v[k] = va[i]; out_i[k] = ia[i]; i += 1; k += 1
+    while j < nb:
+        out_v[k] = vb[j]; out_i[k] = ib[j]; j += 1; k += 1
+    return out_v, out_i
+
+
+def _sort_chunk_indices(args):
+    """Sort one chunk of Vpeak descending; return global indices."""
+    vpeak_chunk, offset = args
+    local_idx = np.argsort(vpeak_chunk, kind='stable')[::-1]
+    return local_idx + offset
+
+
+def _merge_two(args):
+    """Merge two sorted index arrays using numba O(n) merge."""
+    idx_a, idx_b, vpeak = args
+    _, merged_i = _numba_merge_desc(vpeak[idx_a], idx_a, vpeak[idx_b], idx_b)
+    return merged_i
+
+
+def parallel_argsort_desc(vpeak, nthreads=16):
+    """
+    Parallel argsort descending on a 1-D float array.
+
+    1. Split into nthreads chunks; sort each chunk in parallel.
+    2. Merge sorted index arrays hierarchically using numba O(n) merge.
+
+    Returns index array such that vpeak[result] is sorted descending.
+    """
+    vpeak = np.asarray(vpeak)
+    n = len(vpeak)
+    chunk_size = (n + nthreads - 1) // nthreads
+    offsets = [i * chunk_size for i in range(nthreads)]
+    chunks = [(vpeak[o : min(o + chunk_size, n)], o) for o in offsets]
+
+    # Step 1: sort each chunk in parallel
+    with ThreadPoolExecutor(max_workers=nthreads) as ex:
+        sorted_idx = list(ex.map(_sort_chunk_indices, chunks))
+
+    # Step 2: hierarchical parallel merge
+    while len(sorted_idx) > 1:
+        pairs = []
+        leftovers = []
+        for i in range(0, len(sorted_idx) - 1, 2):
+            pairs.append((sorted_idx[i], sorted_idx[i+1], vpeak))
+        if len(sorted_idx) % 2 == 1:
+            leftovers.append(sorted_idx[-1])
+        n_merges = len(pairs)
+        with ThreadPoolExecutor(max_workers=min(nthreads, n_merges)) as ex:
+            merged = list(ex.map(_merge_two, pairs))
+        sorted_idx = merged + leftovers
+
+    return sorted_idx[0]
+
+
+# Warm up numba JIT on first import (small arrays, negligible cost)
+_wv = np.array([3.0, 2.0, 1.0], dtype=np.float32)
+_wi = np.array([0, 1, 2], dtype=np.int64)
+_numba_merge_desc(_wv, _wi, _wv, _wi)
+del _wv, _wi
+
+
+
 
 # Add gaussian scatter to log10(Vpeak) before ranking if required   
 def apply_log_scatter(x, sigma=None, sig_lgv_ref=None, sig_lgv_slope=None,
@@ -71,6 +160,62 @@ def apply_log_scatter(x, sigma=None, sig_lgv_ref=None, sig_lgv_slope=None,
     else:
         eta = np.random.normal(loc=0.0, scale=sigma, size=len(x))
         return x * 10.0**eta
+
+@njit(parallel=True)
+def _apply_scatter_parallel(x, sig_lgv_ref, sig_lgv_slope, lgv_pivot,
+                             alpha_v, f_col_proxy, sigma_min, seed):
+    """
+    Parallel version of apply_log_scatter for the Vpeak-dependent case
+    with optional assembly-history boost (alpha_v).
+    Uses numba's built-in random.gauss for thread-safe per-element RNG.
+    """
+    n   = len(x)
+    out = np.empty(n, dtype=np.float32)
+    np.random.seed(seed)
+    for i in prange(n):
+        log_xi  = np.log10(np.float64(x[i]))
+        sigma_i = sig_lgv_ref + sig_lgv_slope * (log_xi - lgv_pivot)
+        if sigma_i < 0.0:
+            sigma_i = 0.0
+        eta_i = np.random.normal(0.0, 1.0)
+        if alpha_v != 0.0:
+            x_col_i = np.sqrt(3.0) * (1.0 - 2.0 * np.float64(f_col_proxy[i]))
+            denom   = sigma_i if sigma_i > sigma_min else sigma_min
+            boost_i = alpha_v * sigma_min / denom
+            scatter = boost_i * x_col_i + sigma_i * eta_i
+        else:
+            scatter = sigma_i * eta_i
+        out[i] = np.float32(np.float64(x[i]) * 10.0**scatter)
+    return out
+
+
+@njit(parallel=True)
+def _rotate_coords_parallel(x, y, z, R):
+    """
+    Apply a 3x3 rotation matrix R to coordinate arrays in parallel.
+    Returns (xr, yr, zr).
+    """
+    n  = len(x)
+    xr = np.empty(n, dtype=x.dtype)
+    yr = np.empty(n, dtype=y.dtype)
+    zr = np.empty(n, dtype=z.dtype)
+    for i in prange(n):
+        xi = x[i]; yi = y[i]; zi = z[i]
+        xr[i] = R[0,0]*xi + R[0,1]*yi + R[0,2]*zi
+        yr[i] = R[1,0]*xi + R[1,1]*yi + R[1,2]*zi
+        zr[i] = R[2,0]*xi + R[2,1]*yi + R[2,2]*zi
+    return xr, yr, zr
+
+
+# Warmup
+_wn = np.array([100.0, 200.0], dtype=np.float32)
+_wf = np.zeros(2, dtype=np.float32)
+_apply_scatter_parallel(_wn, 0.18, 0.30, 2.6, 0.02, _wf, 0.035, np.int64(42))
+_wR = np.eye(3, dtype=np.float64)
+_wd = np.array([1.0, 2.0], dtype=np.float64)
+_rotate_coords_parallel(_wd, _wd, _wd, _wR)
+del _wn, _wf, _wR, _wd
+
 
 #Generate a random set of Euler angles
 def random_euler_angles(seed=None):
@@ -316,7 +461,7 @@ def make_all_columns_contiguous(tab):
         tab[name] = arr_contig
     return tab
 
-# Parallel routine to read all Uchuu subhalo files
+# Parallel routine to read all Uchuu subhalo files (starmap version — default)
 def read_halolist_parallel(file_paths, randseed, columns, min_logMvir=10.4, min_Vpeak=0.0, lbox=2000.0, frac_box=0.8, xobs=0.0, yobs=0.0, zobs=0.0, use_tmpfiles=False, tmpdir=None):
     """
     Read all Uchuu subhalo files and return an astropy Table.
@@ -348,10 +493,10 @@ def read_halolist_parallel(file_paths, randseed, columns, min_logMvir=10.4, min_
     for i, filename in enumerate(file_paths):
         args.append([filename,randseed*nfiles+i,columns,min_logMvir,min_Vpeak,lbox,frac_box,xobs,yobs,zobs])
         
-    print("Start method:", multiprocessing.get_start_method())
-    ncpus= multiprocessing.cpu_count()
-    nworkers = min(nfiles,ncpus)
-    print("ncpus=",ncpus,"nworkers",nworkers)
+    log.info(f"Start method: {multiprocessing.get_start_method()}")
+    ncpus = multiprocessing.cpu_count()
+    nworkers = min(nfiles, ncpus)
+    log.info(f"ncpus={ncpus}  nworkers={nworkers}")
 
     if use_tmpfiles:
         # ------------------------------------------------------------------
@@ -406,16 +551,19 @@ def read_halolist_parallel(file_paths, randseed, columns, min_logMvir=10.4, min_
         # Original pipe-based method (default).  Works well for low-z
         # snapshots where total data volume is manageable.
         # ------------------------------------------------------------------
+        t_read = time.time()
         with multiprocessing.Pool(nworkers) as pool:
             file_results = pool.starmap(read_halolist_file_reps, args)
-            
+        log.info(f'Parallel read complete in {time.time()-t_read:.1f}s')
+
         tot_bytes = 0
         for d in file_results:
             for v in d.values():
                 tot_bytes += v.nbytes
-        print(f"All file_results = {tot_bytes/1024**3:.1f} GB")
+        log.info(f'All file_results = {tot_bytes/1024**3:.1f} GB')
 
         # concatenate across files without doubling memory usage
+        t_concat = time.time()
         results = {}
         cols = list(file_results[0].keys())
         for col in cols:
@@ -423,9 +571,80 @@ def read_halolist_parallel(file_paths, randseed, columns, min_logMvir=10.4, min_
             # immediately release this column from file_results
             for x in file_results:
                 del x[col]
-        #free up memory        
+        log.info(f'Concatenation done in {time.time()-t_concat:.1f}s')
+        # free up memory
         del file_results
         gc.collect()
+
+    t_table = time.time()
+    tab = Table(results)
+    log.info(f'Table construction done in {time.time()-t_table:.1f}s')
+    return tab
+
+
+def _read_halolist_file_reps_star(args):
+    """Wrapper for pool.imap — unpacks args list."""
+    return read_halolist_file_reps(*args)
+
+
+def read_halolist_parallel_imap(file_paths, randseed, columns, min_logMvir=10.4, min_Vpeak=0.0, lbox=2000.0, frac_box=0.8, xobs=0.0, yobs=0.0, zobs=0.0, use_tmpfiles=False, tmpdir=None):
+    """
+    Experimental imap_unordered version — kept for reference but slower than
+    starmap in practice due to per-result IPC overhead. Do not use in production.
+
+    Uses pool.imap_unordered so that each worker's result is concatenated
+    and freed as soon as it arrives, rather than holding all 100 results
+    (~156 GB) simultaneously in memory before concatenating.
+    """
+    if use_tmpfiles:
+        return read_halolist_parallel(
+            file_paths, randseed, columns,
+            min_logMvir=min_logMvir, min_Vpeak=min_Vpeak,
+            lbox=lbox, frac_box=frac_box,
+            xobs=xobs, yobs=yobs, zobs=zobs,
+            use_tmpfiles=True, tmpdir=tmpdir,
+        )
+
+    nfiles = len(file_paths)
+    args = [
+        [filename, randseed*nfiles+i, columns, min_logMvir, min_Vpeak,
+         lbox, frac_box, xobs, yobs, zobs]
+        for i, filename in enumerate(file_paths)
+    ]
+
+    log.info(f"Start method: {multiprocessing.get_start_method()}")
+    ncpus = multiprocessing.cpu_count()
+    nworkers = min(nfiles, ncpus)
+    log.info(f"ncpus={ncpus}  nworkers={nworkers}")
+
+    # Accumulate results as a list of arrays per column, then concatenate once.
+    # This avoids O(n^2) repeated concatenation and minimises peak memory —
+    # each worker's dict is freed as soon as its columns are appended.
+    t_read = time.time()
+    col_lists = {}   # col_name -> list of arrays, one per file
+    tot_bytes = 0
+    with multiprocessing.Pool(nworkers) as pool:
+        for d in pool.imap_unordered(_read_halolist_file_reps_star, args):
+            for col, arr in d.items():
+                tot_bytes += arr.nbytes
+                if col in col_lists:
+                    col_lists[col].append(arr)
+                else:
+                    col_lists[col] = [arr]
+            del d
+            gc.collect()
+    log.info(f'Parallel read + streaming collect complete in {time.time()-t_read:.1f}s')
+    log.info(f'All file_results = {tot_bytes/1024**3:.1f} GB')
+
+    # Final concatenation — one np.concatenate call per column
+    t_concat = time.time()
+    results = {}
+    for col, arrays in col_lists.items():
+        results[col] = np.concatenate(arrays)
+        del col_lists[col]  # free as we go
+    log.info(f'Final concatenation done in {time.time()-t_concat:.1f}s')
+    del col_lists
+    gc.collect()
 
     return Table(results)
 
@@ -433,6 +652,86 @@ def read_halolist_parallel(file_paths, randseed, columns, min_logMvir=10.4, min_
 # Three routines that are just-in-time compiled using numba:
     
 # compute the rms scatter in quantity z among the N_neigh neighbours of each element in the array
+@njit(parallel=True)
+def compute_sky_coords(x, y, z, vx, vy, vz, Dc_grid, z_grid):
+    """
+    Compute sky coordinates and redshifts for all subhalos in one parallel pass.
+
+    Parameters
+    ----------
+    x, y, z   : float64 arrays, comoving position relative to observer [Mpc/h]
+    vx, vy, vz: float32 arrays, peculiar velocity [km/s]
+    Dc_grid   : float64 array, comoving distance grid for z interpolation
+    z_grid    : float64 array, redshift grid corresponding to Dc_grid
+
+    Returns
+    -------
+    dist  : float32  — comoving distance [Mpc/h]
+    ra    : float32  — right ascension [degrees]
+    dec   : float32  — declination [degrees]
+    zu    : float32  — real-space redshift
+    zobs  : float32  — redshift-space redshift
+    """
+    n = len(x)
+    c_light = np.float64(299792.458)
+    pi      = np.float64(3.141592653589793)
+    r2d     = np.float64(180.0 / pi)
+    ng      = len(Dc_grid)
+
+    dist = np.empty(n, dtype=np.float64)
+    ra   = np.empty(n, dtype=np.float32)
+    dec  = np.empty(n, dtype=np.float32)
+    zu   = np.empty(n, dtype=np.float32)
+    zobs = np.empty(n, dtype=np.float32)
+
+    for i in prange(n):
+        xi = x[i]; yi = y[i]; zi = z[i]
+        d  = np.sqrt(xi*xi + yi*yi + zi*zi)
+        dist[i] = d
+
+        # RA and DEC
+        dec[i] = np.float32(r2d * np.arcsin(zi / d))
+        ra_val = r2d * np.arctan2(yi, xi)
+        if ra_val < 0.0:
+            ra_val += 360.0
+        ra[i] = np.float32(ra_val)
+
+        # Radial velocity / c
+        vr_c = (xi * np.float64(vx[i]) +
+                yi * np.float64(vy[i]) +
+                zi * np.float64(vz[i])) / (c_light * d)
+
+        # Real-space redshift via linear interpolation on Dc_grid
+        # Binary search for d in Dc_grid
+        lo = np.int64(0)
+        hi = np.int64(ng - 2)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if Dc_grid[mid + 1] <= d:
+                lo = mid + 1
+            else:
+                hi = mid
+        t    = (d - Dc_grid[lo]) / (Dc_grid[lo + 1] - Dc_grid[lo])
+        zu_i = z_grid[lo] + t * (z_grid[lo + 1] - z_grid[lo])
+        zu[i] = np.float32(zu_i)
+
+        # Redshift-space redshift
+        zobs[i] = np.float32((1.0 + zu_i) * (1.0 + vr_c) - 1.0)
+
+    return dist, ra, dec, zu, zobs
+
+
+_wx = np.array([100.0, 200.0], dtype=np.float64)
+_wDc = np.linspace(0.0, 3000.0, 100)
+_wz  = np.linspace(0.0, 1.0,   100)
+compute_sky_coords(_wx, _wx, _wx,
+                   np.ones(2, dtype=np.float32),
+                   np.ones(2, dtype=np.float32),
+                   np.ones(2, dtype=np.float32),
+                   _wDc, _wz)
+del _wx, _wDc, _wz
+
+
 @njit(parallel=True)
 def compute_scatter(z, N_neigh):
     zloc=z #make a temporary local copy which might help cache usage and numba efficency
@@ -520,49 +819,52 @@ def compute_frac_local(z, N_neigh):
 
 
 
-# i) Sort the subhalos into decreasing order of Vpeak 
+# i) Sort the subhalos into decreasing order of Vpeak (index only — no physical reorder)
 # ii) Compute fraction of neighbours with higher zpeak
-#iii) Add scatter to Vpeak and sort again
+#iii) Add scatter to Vpeak and sort again (index only)
 # iv) Trim the catalogue by applying a tailored Vpeak(z) threshold
+# v) Store sort index in subhalos['sort_idx'] for use at write time
 def pre_sort_subhalos(subhalos, N_neigh=100, sig_lgv_ref=0.0, sig_lgv_slope=0.0,
                       lgv_pivot=2.6, f_colour=0.0, seed_fcolour=42,
-                      alpha_v=0.0, plot=False):
-    
-    start_time = time.time()
-    print("Starting sort")
-    subhalos.sort('Vpeak')
-    print("Sort complete")
-    subhalos.reverse()
-    print("Reversal complete")
-    end_time = time.time()
-    print(f"time to sort subhalos: {end_time - start_time:.4f} seconds")
+                      alpha_v=0.0, plot=False, nthreads=16):
 
     nsub = len(subhalos)
+
+    # ------------------------------------------------------------------
+    # Sort 1: parallel argsort of Vpeak only — no full-table reorder
+    # ------------------------------------------------------------------
+    start_time = time.time()
+    log.info("Starting argsort 1 (index only, no table reorder)")
+    idx1 = parallel_argsort_desc(subhalos['Vpeak'], nthreads=nthreads)
+    end_time = time.time()
+    log.info(f"Argsort 1 complete in {end_time - start_time:.1f}s")
 
 
   
     # ------------------------------------------------------------------
     # compute FRAC (local rank statistic)
+    # compute_frac_local_mpeak requires Mpeak_Scale in Vpeak-sorted order,
+    # so we apply idx1 to Mpeak_Scale only (~8 GB reorder — cheap).
     # ------------------------------------------------------------------
     start_time = time.time()
-    # Convert Mpeak_Scale to log10 in-place, add noise in log space, compute FracZpeak.
-    # f_colour > 0: Gaussian scatter with sigma=f_colour in log10(Mpeak_Scale) units,
-    #               large enough to mix quantization bands (~0.02-0.03 apart in log).
-    # f_colour = 0: uniform +-0.005 tie-breaking noise only (same effect as before).
-    # All operations are in-place or on a single temporary noise array to minimise
-    # memory usage — Mpeak_Scale is not needed again after FracZpeak is computed.
-    mps = subhalos['Mpeak_Scale']  # pointer to existing array — writes go back to table
+    mps_raw = np.asarray(subhalos['Mpeak_Scale'])[idx1]  # reorder Mpeak_Scale by idx1
     rng_fc = np.random.default_rng(seed_fcolour)
     if f_colour > 0.0:
-        noise = rng_fc.standard_normal(len(mps)).astype(np.float32) * np.float32(f_colour)
+        noise = rng_fc.standard_normal(len(mps_raw)).astype(np.float32) * np.float32(f_colour)
     else:
-        noise = (rng_fc.random(len(mps)).astype(np.float32) - 0.5) * np.float32(0.01)
-    np.log10(mps, out=mps)  # in-place log10; Mpeak_Scale not used again after FracZpeak
-    mps += noise             # add noise in log space
+        noise = (rng_fc.random(len(mps_raw)).astype(np.float32) - 0.5) * np.float32(0.01)
+    np.log10(mps_raw, out=mps_raw)
+    mps_raw += noise
     del noise
-    subhalos['FracZpeak'] = compute_frac_local_mpeak(subhalos['Mpeak_Scale'], N_neigh=N_neigh)
+    frac_sorted = compute_frac_local_mpeak(mps_raw, N_neigh=N_neigh)
+    del mps_raw
+    # Map FracZpeak back to original (unsorted) order using inverse of idx1
+    inv_idx1 = np.empty(nsub, dtype=np.int64)
+    inv_idx1[idx1] = np.arange(nsub, dtype=np.int64)
+    subhalos['FracZpeak'] = frac_sorted[inv_idx1]
+    del frac_sorted, inv_idx1
     end_time = time.time()
-    print(f"time to compute FracZpeak: {end_time - start_time:.4f} seconds")
+    log.info(f"FracZpeak computed in {end_time - start_time:.1f}s")
 
     if sig_lgv_ref > 0.0 or sig_lgv_slope != 0.0:
         #Add scatter to Vpeak
@@ -576,27 +878,30 @@ def pre_sort_subhalos(subhalos, N_neigh=100, sig_lgv_ref=0.0, sig_lgv_slope=0.0,
             vpeak_old = subhalos['Vpeak'][idx].copy()  # small sampled copy only
             log_mpeak_s = np.log10(subhalos['Mvir_all'][idx])  # grab Mpeak at same indices
 
-        subhalos['Vpeak'] = apply_log_scatter(
-            subhalos['Vpeak'],
-            sig_lgv_ref=sig_lgv_ref,
-            sig_lgv_slope=sig_lgv_slope,
-            lgv_pivot=lgv_pivot,
-            alpha_v=alpha_v,
-            f_col_proxy=subhalos['FracZpeak'] if alpha_v != 0.0 else None,
+        SIGMA_MIN = np.float64(0.035)
+        f_proxy = np.asarray(subhalos['FracZpeak'], dtype=np.float32) \
+                  if alpha_v != 0.0 else np.zeros(nsub, dtype=np.float32)
+        subhalos['Vpeak'] = _apply_scatter_parallel(
+            np.asarray(subhalos['Vpeak'], dtype=np.float32),
+            np.float64(sig_lgv_ref),
+            np.float64(sig_lgv_slope),
+            np.float64(lgv_pivot),
+            np.float64(alpha_v),
+            f_proxy,
+            SIGMA_MIN,
+            np.int64(seed_fcolour),
         )
+        del f_proxy
         if plot:
             vpeak_new = subhalos['Vpeak'][idx].copy()  # grab sample BEFORE sort
 
         end_time = time.time()
-        print(f"time to add Vpeak scatter: {end_time - start_time:.4f} seconds")
+        log.info(f"Vpeak scatter added in {end_time - start_time:.1f}s")
         start_time = time.time()
-        print("Starting 2nd sort")
-        subhalos.sort('Vpeak')
-        print("Sort complete")
-        subhalos.reverse()
-        print("Reversal complete")
+        log.info("Starting argsort 2 (index only, no table reorder)")
+        idx2 = parallel_argsort_desc(subhalos['Vpeak'], nthreads=nthreads)
         end_time = time.time()
-        print(f"time to sort subhalos: {end_time - start_time:.4f} seconds")
+        log.info(f"Argsort 2 complete in {end_time - start_time:.1f}s")
         if plot:
            
             log_old = np.log10(vpeak_old)
@@ -640,30 +945,36 @@ def pre_sort_subhalos(subhalos, N_neigh=100, sig_lgv_ref=0.0, sig_lgv_slope=0.0,
             plt.show()
 
     
-    # Rank index
+    # ------------------------------------------------------------------
+    # Final sort index: idx2 if scatter was applied, idx1 otherwise
+    # ------------------------------------------------------------------
+    final_idx = idx2 if (sig_lgv_ref > 0.0 or sig_lgv_slope != 0.0) else idx1
+
+    # Rank index: position in final sorted order (1 = highest Vpeak)
+    # Stored in original (unsorted) row order via inverse index.
     start_time = time.time()
-    #First check if int32 is sufficient to rank all the subhalos
-    #if nsub > np.iinfo(np.int32).max:
-    #        raise RuntimeError(
-    #       f"{nsub=} exceeds int32 limit "
-    #        f"{np.iinfo(np.int32).max}"
-    #    )
-    subhalos['i1'] = np.arange(1, nsub + 1, dtype=np.int64)
-    print('These numbers should be the same if ranking done as expected. nsub=',len(subhalos),'?=?',np.max(subhalos["i1"]))
-    print('and  1 ?=?', np.min(subhalos["i1"]))
+    i1_sorted = np.arange(1, nsub + 1, dtype=np.int64)
+    inv_final = np.empty(nsub, dtype=np.int64)
+    inv_final[final_idx] = np.arange(nsub, dtype=np.int64)
+    subhalos['i1'] = i1_sorted[inv_final]
+    del i1_sorted, inv_final
+    log.info(f'Rank index: nsub={nsub:,} max(i1)={np.max(subhalos["i1"]):,} min(i1)={np.min(subhalos["i1"]):,}')
     end_time = time.time()
-    print(f"time to define rank index: {end_time - start_time:.4f} seconds")
-    
+    log.info(f"Rank index defined in {end_time - start_time:.1f}s")
+
     # ------------------------------------------------------------------
-    # Distance dependent trimming
+    # Distance dependent trimming — element-wise, no sort needed
     # ------------------------------------------------------------------
     start_time = time.time()
-    dist=subhalos['dist']
+    dist  = subhalos['dist']
     limit = ((6.5e-07 * dist - 9.02e-04) * dist + 0.486) * dist + 10.0
-    mask = subhalos['Vpeak'] >limit
+    mask  = subhalos['Vpeak'] > limit
     subhalos['keep'] = mask
     end_time = time.time()
-    print(f"time to define distance dependent trimming mask: {end_time - start_time:.4f} seconds")
+    log.info(f"Distance trimming mask defined in {end_time - start_time:.1f}s")
+
+    # Store final sort index for use at write time (applied after trimming)
+    subhalos['sort_idx'] = final_idx.astype(np.int64)
 
     return subhalos
 
