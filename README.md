@@ -260,7 +260,7 @@ salloc --nodes=1 --qos=interactive --constraint=cpu --account=desi \
 
 # Set up the DESI software environment
 source /global/common/software/desi/users/adematti/cosmodesi_environment.sh main
-export PYTHONPATH=:$SCRATCH/LSS/py:$HOME/ShaunColeDESI:$PYTHONPATH
+export PYTHONPATH=:$SCRATCH/LSS/py:$HOME/DirectSHAM/pipeline:$PYTHONPATH
 ```
 
 Useful bash functions (add to `~/.bashrc`):
@@ -319,7 +319,7 @@ REF=0.18; SLOPE=0.30; FC=0.00; AL=0.02; SEED=0  # current best-fit
 # 1. Build the random catalogue (login node, once per data release)
 python pipeline/make_random.py
 
-# 2. Build the subhalo checkpoint (compute node, ~1 hr)
+# 2. Build the subhalo checkpoint (compute node, ~20 min)
 python pipeline/make_checkpoint.py --reg NS --obs_seed $SEED \
     --sig_lgv_ref $REF --sig_lgv_slope $SLOPE --alpha $AL
 
