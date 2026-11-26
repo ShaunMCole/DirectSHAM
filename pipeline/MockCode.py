@@ -947,6 +947,35 @@ def pre_sort_subhalos(subhalos, N_neigh=100, sig_lgv_ref=0.0, sig_lgv_slope=0.0,
 
     
     # ------------------------------------------------------------------
+    # Post-scatter FracZpeak recomputation
+    # FracZpeak was computed above on the pre-scatter Vpeak ordering (idx1)
+    # and used in the alpha term of the scatter formula.  With alpha>0 the
+    # scatter direction is correlated with FracZpeak, so at a given
+    # post-scatter Vpeak rank FracZpeak is no longer uniform.  Recomputing
+    # on the post-scatter ordering (idx2) restores uniformity at each
+    # post-scatter Vpeak and decouples the colour assignment from the
+    # scatter, ensuring the colour distribution is independent of alpha.
+    # ------------------------------------------------------------------
+    if sig_lgv_ref > 0.0 or sig_lgv_slope != 0.0:
+        start_time = time.time()
+        mps_raw2 = np.asarray(subhalos['Mpeak_Scale'])[idx2]
+        rng_fc2 = np.random.default_rng(seed_fcolour + 1)
+        if f_colour > 0.0:
+            noise2 = rng_fc2.standard_normal(len(mps_raw2)).astype(np.float32) * np.float32(f_colour)
+        else:
+            noise2 = (rng_fc2.random(len(mps_raw2)).astype(np.float32) - 0.5) * np.float32(0.01)
+        np.log10(mps_raw2, out=mps_raw2)
+        mps_raw2 += noise2
+        del noise2
+        frac_sorted2 = compute_frac_local_mpeak(mps_raw2, N_neigh=N_neigh)
+        del mps_raw2
+        inv_idx2 = np.empty(nsub, dtype=np.int64)
+        inv_idx2[idx2] = np.arange(nsub, dtype=np.int64)
+        subhalos['FracZpeak'] = frac_sorted2[inv_idx2]
+        del frac_sorted2, inv_idx2
+        log.info(f"Post-scatter FracZpeak recomputed in {time.time() - start_time:.1f}s")
+
+    # ------------------------------------------------------------------
     # Final sort index: idx2 if scatter was applied, idx1 otherwise
     # ------------------------------------------------------------------
     final_idx = idx2 if (sig_lgv_ref > 0.0 or sig_lgv_slope != 0.0) else idx1
