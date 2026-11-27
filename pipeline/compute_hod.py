@@ -24,7 +24,7 @@ import fitsio
 
 MODEL_DIR = Path(
     "/global/cfs/cdirs/desi/users/smcole/DirectSHAM/16thNov/N_neigh_lum50"
-    "/seed000_sig_lgv0.18_0.30_fc0.00_al0.02"
+    "/seed000_sig_lgv0.24_0.42_fc0.00_al0.02"
 )
 
 MOCK_CATS = [

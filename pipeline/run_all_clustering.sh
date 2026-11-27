@@ -11,7 +11,7 @@
 #                              [--f_colour F] [--alpha A] [--njack J]
 #                              [--skip_data] [--skip_mock]
 #
-# Defaults are the current fiducial model (16thNov, alpha_v = 0.02).
+# Defaults are the current fiducial model (16thNov; sig_lgv 0.24, 0.42; alpha_v = 0.02).
 # Data clustering is skipped automatically if it already exists under
 # DATA_DATE_DIR/clustering/data/ (DATA_DATE_DIR taken from config.py).
 
@@ -24,8 +24,8 @@ cd ~/DirectSHAM/pipeline
 
 # --- Defaults ---
 OBS_SEED=0
-SIG_LGV_REF=0.18
-SIG_LGV_SLOPE=0.30
+SIG_LGV_REF=0.24
+SIG_LGV_SLOPE=0.42
 F_COLOUR=0.00
 ALPHA=0.02
 NJACK=60

@@ -28,10 +28,10 @@ export PYTHONPATH=:$SCRATCH/LSS/py:$HOME/DirectSHAM/pipeline:$PYTHONPATH
 
 cd ~/DirectSHAM/pipeline
 
-# --- Defaults: current fiducial model (16thNov) ---
+# --- Defaults: current fiducial model (16thNov; sig_lgv 0.24, 0.42; alpha_v = 0.02) ---
 OBS_SEED=0
-SIG_LGV_REF=0.18
-SIG_LGV_SLOPE=0.30
+SIG_LGV_REF=0.24
+SIG_LGV_SLOPE=0.42
 F_COLOUR=0.00
 ALPHA=0.02
 STAGE=all

@@ -1,7 +1,7 @@
 """
 S5PanelColourClustering2.py — Five-panel red/blue colour-split clustering
 figure for the MNRAS paper, showing the Vpeak-dependent scatter model
-(sig_lgv_ref=0.18, sig_lgv_slope=0.30, f_colour=0.00) against BGS DR2 data.
+(sig_lgv_ref=0.24, sig_lgv_slope=0.42, f_colour=0.00) against BGS DR2 data.
 
 Single-column vertical layout with shared x-axis:
     [ Mr<-21.5 ]
@@ -30,7 +30,7 @@ DATA_DATE_DIR = Path(
     "/global/cfs/cdirs/desi/users/smcole/DirectSHAM/16thNov"
 )
 MODEL_DIR = DATA_DATE_DIR / (
-    "N_neigh_lum50/seed000_sig_lgv0.18_0.30_fc0.00_al0.02"
+    "N_neigh_lum50/seed000_sig_lgv0.24_0.42_fc0.00_al0.02"
 )
 OUT_STEM = Path(__file__).resolve().parent / "S5PanelColourClustering2"
 

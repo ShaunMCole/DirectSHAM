@@ -24,7 +24,7 @@
 # To propagate a different data date or model, set DATA_DATE and MODEL_DIR
 # before running:
 #
-#   DATA_DATE=16thNov MODEL_DIR=N_neigh_lum50/seed000_sig_lgv0.18_0.30_fc0.00_al0.02 \
+#   DATA_DATE=16thNov MODEL_DIR=N_neigh_lum50/seed000_sig_lgv0.24_0.42_fc0.00_al0.02 \
 #       bash ~/DirectSHAM/pipeline/propagate_stellar_masses.sh
 
 set -euo pipefail
@@ -34,7 +34,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 DATA_DIR="/global/cfs/cdirs/desi/users/smcole/DirectSHAM"
 DATA_DATE="${DATA_DATE:-16thNov}"
-MODEL_DIR="${MODEL_DIR:-N_neigh_lum50/seed000_sig_lgv0.18_0.30_fc0.00_al0.02}"
+MODEL_DIR="${MODEL_DIR:-N_neigh_lum50/seed000_sig_lgv0.24_0.42_fc0.00_al0.02}"
 
 DATE_DIR="${DATA_DIR}/${DATA_DATE}"
 MODEL_PATH="${DATE_DIR}/${MODEL_DIR}"

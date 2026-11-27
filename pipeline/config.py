@@ -160,8 +160,8 @@ NMULT_DOWNSAMPLE_SEED = 12345
 # Vpeak scatter parametrisation: sig_lgv = sig_lgv_ref + sig_lgv_slope * (log10(Vpeak) - 2.6)
 # sig_lgv_ref: scatter at log10(Vpeak/km/s) = 2.6  (~Mr = -21)
 # sig_lgv_slope: gradient with log10(Vpeak) (positive = more scatter for brighter/more massive haloes)
-DEFAULT_SIG_LGV_REF   = 0.18
-DEFAULT_SIG_LGV_SLOPE = 0.30
+DEFAULT_SIG_LGV_REF   = 0.24   # Nov 27 2026: was 0.18 (CWR / 16thNov fiducial)
+DEFAULT_SIG_LGV_SLOPE = 0.42   # Nov 27 2026: was 0.30; sigma_v held at ~0.035 at log10(Vpeak)=2.12
 DEFAULT_LGV_PIVOT     = 2.6   # log10(Vpeak/[km/s]) pivot point
 DEFAULT_F_COLOUR      = 0.0   # Gaussian scatter in log10(Mpeak_Scale) for assembly-bias colour assignment
 DEFAULT_ALPHA         = 0.02  # Assembly-history scatter amplitude (luminosity-dependent suppression, SIGMA_MIN=0.035 hardwired)
@@ -190,7 +190,7 @@ NLUM_DIR_TEMPLATE = "N_neigh_lum{n_neigh_lum:d}"
 
 # Model directory name — all files for one scatter realisation live here,
 # under the N_neigh_lum directory.
-# e.g. DATA_DATE_DIR / "N_neigh_lum50" / "seed000_sig_lgv0.18_0.30/"
+# e.g. DATA_DATE_DIR / "N_neigh_lum50" / "seed000_sig_lgv0.24_0.42_fc0.00_al0.02/"
 MODEL_DIR_TEMPLATE = "seed{obs_seed:03d}_sig_lgv{sig_lgv_ref:.2f}_{sig_lgv_slope:.2f}_fc{f_colour:.2f}_al{alpha:.2f}"
 
 

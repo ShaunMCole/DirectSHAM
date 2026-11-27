@@ -1,7 +1,7 @@
 """
 S5PanelClustering2.py — Five-panel monochrome clustering figure for the MNRAS
 paper, showing the Vpeak-dependent scatter model
-(sig_lgv_ref=0.18, sig_lgv_slope=0.30, f_colour=0.00) against BGS DR2 data.
+(sig_lgv_ref=0.24, sig_lgv_slope=0.42, f_colour=0.00) against BGS DR2 data.
 
 Single-column vertical layout with shared x-axis:
     [ Mr<-21.5 ]
@@ -44,13 +44,13 @@ def parse_args():
                    help='If set, overplot a second mock with this alpha_v value '
                         '(e.g. --alpha2 0.2 to compare al0.00 vs al0.20). '
                         'Uses obs_seed=0 for both unless --seed2 is also set.')
-    p.add_argument('--slope', type=float, default=0.30,
-                   help='sig_lgv_slope for the primary mock (default: 0.30).')
+    p.add_argument('--slope', type=float, default=0.42,
+                   help='sig_lgv_slope for the primary mock (default: 0.42).')
     p.add_argument('--slope2', type=float, default=None,
                    help='If set, use this sig_lgv_slope for the second mock '
                         '(default: same as --slope).')
-    p.add_argument('--ref', type=float, default=0.18,
-                   help='sig_lgv_ref for the primary mock (default: 0.18).')
+    p.add_argument('--ref', type=float, default=0.24,
+                   help='sig_lgv_ref for the primary mock (default: 0.24).')
     p.add_argument('--ref2', type=float, default=None,
                    help='If set, use this sig_lgv_ref for the second mock '
                         '(default: same as --ref).')
@@ -95,7 +95,7 @@ COL_XI2_MOCK2 = '#aec7e8'
 # Path helpers
 # =============================================================================
 
-def model_dir(obs_seed, alpha=0.0, slope=0.30, ref=0.18):
+def model_dir(obs_seed, alpha=0.0, slope=0.42, ref=0.24):
     return DATA_DATE_DIR / (
         f"N_neigh_lum50/seed{obs_seed:03d}_sig_lgv{ref:.2f}_{slope:.2f}_fc0.00_al{alpha:.2f}"
     )
@@ -111,7 +111,7 @@ def data_file(mr_cut, zmin, zmax):
     return smu_dir / pattern
 
 
-def mock_file(mr_cut, zmin, zmax, obs_seed=0, lightcone=False, alpha=0.0, slope=0.30, ref=0.18):
+def mock_file(mr_cut, zmin, zmax, obs_seed=0, lightcone=False, alpha=0.0, slope=0.42, ref=0.24):
     lc_tag     = "_lightcone" if lightcone else ""
     sample_tag = f"Mr{mr_cut}_z{zmin:.2f}-{zmax:.2f}{lc_tag}"
     smu_dir    = model_dir(obs_seed, alpha=alpha, slope=slope, ref=ref) / "clustering" / sample_tag / "smu"
@@ -177,7 +177,7 @@ def compute_chi2(s_dat, xi_dat, err_dat, s_mock, xi_mock,
 
 
 def plot_mock(ax, mr, z0, z1, obs_seed, lightcone, col0, col2,
-              label0, label2, s_d, xi_dat_g, err_dat_g, ells, alpha=0.0, slope=0.30, ref=0.18):
+              label0, label2, s_d, xi_dat_g, err_dat_g, ells, alpha=0.0, slope=0.42, ref=0.24):
     """Load and plot one mock; return legend handles and chi2/dof string."""
     result = load_result(mock_file(mr, z0, z1, obs_seed=obs_seed,
                                    lightcone=lightcone, alpha=alpha, slope=slope, ref=ref))
@@ -210,10 +210,10 @@ def main():
     only_tag  = "_only" if args.seed2_only else ""
     al_tag    = f"_al{args.alpha:.2f}"
     al2_tag   = f"_vs_al{args.alpha2:.2f}" if args.alpha2 is not None else ""
-    sl_tag    = f"_sl{args.slope:.2f}" if args.slope != 0.30 else ""
+    sl_tag    = f"_sl{args.slope:.2f}" if args.slope != 0.42 else ""
     slope2    = args.slope2 if args.slope2 is not None else args.slope
     sl2_tag   = f"_vs_sl{slope2:.2f}" if args.slope2 is not None else ""
-    rf_tag    = f"_ref{args.ref:.2f}" if args.ref != 0.18 else ""
+    rf_tag    = f"_ref{args.ref:.2f}" if args.ref != 0.24 else ""
     ref2      = args.ref2 if args.ref2 is not None else args.ref
     rf2_tag   = f"_vs_ref{ref2:.2f}" if args.ref2 is not None else ""
     out_stem  = (
