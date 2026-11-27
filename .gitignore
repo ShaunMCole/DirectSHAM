@@ -38,3 +38,7 @@ f=*
 .#*
 wiki/
 wiki/
+.ipynb_checkpoints/
+logs/
+data
+notebooks/
