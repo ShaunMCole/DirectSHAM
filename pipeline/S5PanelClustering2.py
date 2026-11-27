@@ -49,6 +49,11 @@ def parse_args():
     p.add_argument('--slope2', type=float, default=None,
                    help='If set, use this sig_lgv_slope for the second mock '
                         '(default: same as --slope).')
+    p.add_argument('--ref', type=float, default=0.18,
+                   help='sig_lgv_ref for the primary mock (default: 0.18).')
+    p.add_argument('--ref2', type=float, default=None,
+                   help='If set, use this sig_lgv_ref for the second mock '
+                        '(default: same as --ref).')
     return p.parse_args()
 
 # =============================================================================
@@ -90,9 +95,9 @@ COL_XI2_MOCK2 = '#aec7e8'
 # Path helpers
 # =============================================================================
 
-def model_dir(obs_seed, alpha=0.0, slope=0.30):
+def model_dir(obs_seed, alpha=0.0, slope=0.30, ref=0.18):
     return DATA_DATE_DIR / (
-        f"N_neigh_lum50/seed{obs_seed:03d}_sig_lgv0.18_{slope:.2f}_fc0.00_al{alpha:.2f}"
+        f"N_neigh_lum50/seed{obs_seed:03d}_sig_lgv{ref:.2f}_{slope:.2f}_fc0.00_al{alpha:.2f}"
     )
 
 
@@ -106,10 +111,10 @@ def data_file(mr_cut, zmin, zmax):
     return smu_dir / pattern
 
 
-def mock_file(mr_cut, zmin, zmax, obs_seed=0, lightcone=False, alpha=0.0, slope=0.30):
+def mock_file(mr_cut, zmin, zmax, obs_seed=0, lightcone=False, alpha=0.0, slope=0.30, ref=0.18):
     lc_tag     = "_lightcone" if lightcone else ""
     sample_tag = f"Mr{mr_cut}_z{zmin:.2f}-{zmax:.2f}{lc_tag}"
-    smu_dir    = model_dir(obs_seed, alpha=alpha, slope=slope) / "clustering" / sample_tag / "smu"
+    smu_dir    = model_dir(obs_seed, alpha=alpha, slope=slope, ref=ref) / "clustering" / sample_tag / "smu"
     pattern    = (
         f"allcounts_BGS_BRIGHT_GCcomb_{zmin:.2f}_{zmax:.2f}_default"
         f"_log_njack0_nran1_split20.npy"
@@ -172,10 +177,10 @@ def compute_chi2(s_dat, xi_dat, err_dat, s_mock, xi_mock,
 
 
 def plot_mock(ax, mr, z0, z1, obs_seed, lightcone, col0, col2,
-              label0, label2, s_d, xi_dat_g, err_dat_g, ells, alpha=0.0, slope=0.30):
+              label0, label2, s_d, xi_dat_g, err_dat_g, ells, alpha=0.0, slope=0.30, ref=0.18):
     """Load and plot one mock; return legend handles and chi2/dof string."""
     result = load_result(mock_file(mr, z0, z1, obs_seed=obs_seed,
-                                   lightcone=lightcone, alpha=alpha, slope=slope))
+                                   lightcone=lightcone, alpha=alpha, slope=slope, ref=ref))
     handles = []
     chi2_str = '?'
     if result is not None and s_d is not None:
@@ -208,9 +213,12 @@ def main():
     sl_tag    = f"_sl{args.slope:.2f}" if args.slope != 0.30 else ""
     slope2    = args.slope2 if args.slope2 is not None else args.slope
     sl2_tag   = f"_vs_sl{slope2:.2f}" if args.slope2 is not None else ""
+    rf_tag    = f"_ref{args.ref:.2f}" if args.ref != 0.18 else ""
+    ref2      = args.ref2 if args.ref2 is not None else args.ref
+    rf2_tag   = f"_vs_ref{ref2:.2f}" if args.ref2 is not None else ""
     out_stem  = (
         Path(__file__).resolve().parent
-        / f"S5PanelClustering2{lc_tag}{al_tag}{al2_tag}{sl_tag}{sl2_tag}{seed2_tag}{only_tag}"
+        / f"S5PanelClustering2{lc_tag}{al_tag}{al2_tag}{rf_tag}{sl_tag}{rf2_tag}{sl2_tag}{seed2_tag}{only_tag}"
     )
 
     ells = [0, 2]
@@ -266,6 +274,8 @@ def main():
                 seed1_label = fr'$\alpha_v={args.alpha:.2f}$'
             elif args.seed2 is not None:
                 seed1_label = 'seed000'
+            elif args.ref2 is not None or args.slope2 is not None:
+                seed1_label = fr'$\sigma_{{v}}$: {args.ref:.2f}, {args.slope:.2f}'
             else:
                 seed1_label = 'Mock'
             h1, chi2_1 = plot_mock(
@@ -275,16 +285,19 @@ def main():
                 label0=fr'{seed1_label} $\xi_0$',
                 label2=fr'{seed1_label} $\xi_2$',
                 s_d=s_d, xi_dat_g=xi_dat_g, err_dat_g=err_dat_g, ells=ells,
-                alpha=args.alpha, slope=args.slope,
+                alpha=args.alpha, slope=args.slope, ref=args.ref,
             )
             legend_handles.extend(h1)
 
         # --- Mock 2 (seed2 or alpha2, if requested) ---
-        if args.seed2 is not None or args.alpha2 is not None:
+        if (args.seed2 is not None or args.alpha2 is not None
+                or args.slope2 is not None or args.ref2 is not None):
             obs_seed_2  = args.seed2 if args.seed2 is not None else 0
             alpha_2     = args.alpha2 if args.alpha2 is not None else args.alpha
             if args.alpha2 is not None:
                 seed2_label = fr'$\alpha_v={args.alpha2:.2f}$'
+            elif args.seed2 is None:
+                seed2_label = fr'$\sigma_{{v}}$: {ref2:.2f}, {slope2:.2f}'
             else:
                 seed2_label = f'seed{args.seed2:03d}'
             h2, chi2_2 = plot_mock(
@@ -294,7 +307,7 @@ def main():
                 label0=fr'{seed2_label} $\xi_0$',
                 label2=fr'{seed2_label} $\xi_2$',
                 s_d=s_d, xi_dat_g=xi_dat_g, err_dat_g=err_dat_g, ells=ells,
-                alpha=alpha_2, slope=slope2,
+                alpha=alpha_2, slope=slope2, ref=ref2,
             )
             legend_handles.extend(h2)
 

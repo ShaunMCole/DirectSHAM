@@ -27,6 +27,16 @@ Script-to-figure mapping for Cole et al. (2026). All plotting scripts are in
 | 17 | `S5PanelClustering2.py` (lightcone mode) | Lightcone mock ξ₀ and ξ₂ vs data, five luminosity bins |
 | 18 | `plot_lss_clustering.py` | LSS sample ξ₀ and ξ₂: data (black/grey), lightcone mock (red), cut-sky mock (blue) |
 
+### Regeneration status for the 16thNov/al0.02 model
+
+| Fig. | Status |
+|------|--------|
+| 12 | Updated |
+| 10 | Pending — rerun `compute_hod.py` on 16thNov mock |
+| 16 | Pending — SF/passive clustering for 16thNov mock (`run_sfq_clustering.sh`) |
+| 17 | Pending — lightcone rebuild for 16thNov/al0.02 |
+| 18 | Pending — `measure_lss_clustering.py` on 16thNov lightcone |
+
 Figures 1, 2, 3, 5, 6, 7 are produced by inspection/diagnostic scripts or
 notebooks and do not have a dedicated standalone plotting script in
 `pipeline/`.
@@ -55,13 +65,13 @@ flexible CLI-driven version for diagnostic use.
 
 ### Fig. 12 — linear bias
 `compute_bias.py` fits the Kaiser monopole model over 10 < s < 40 h⁻¹ Mpc.
-**Known issue:** colour split in `get_median_redshift()` and `get_halo_properties()`
-uses hardcoded `gmr >= 0.6` instead of the correct `0.21 - 0.03*ABSMAG_RP1` —
-fix before rerunning.
+Colour split in `get_median_redshift()` and `get_halo_properties()` now uses
+`0.21 - 0.03*ABSMAG_RP1` (previously hardcoded `gmr >= 0.6`; fixed Nov 17 2026).
+**Updated** for the 16thNov/al0.02 model.
 
 ### Fig. 15 — stellar mass clustering
-`compare_clustering_mstar.py` reads data from 6thOct clustering directory
-(2dp z formatting) and mock from 16thNov model directory (3dp z formatting).
+`compare_clustering_mstar.py` reads mock from the 16thNov model directory
+(3dp z formatting). <!-- CHECK: data still read from 6thOct (2dp), or moved to 16thNov? -->
 CIGALE solid curves, FSF dotted curves.
 
 ### Fig. 16 — SF/quenched clustering
